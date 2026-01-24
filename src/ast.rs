@@ -25,6 +25,8 @@ pub enum Operator {
     DedupeWithCounts,
     /// `+` - sum numeric values
     Sum,
+    /// `#` - count elements
+    Count,
     /// Selection - select elements by index, slice, or multi-select
     Selection(Selection),
 }

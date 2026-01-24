@@ -281,6 +281,21 @@ fn sum_recursive(value: &Value) -> f64 {
     }
 }
 
+/// Count operator - returns the number of elements in an array.
+///
+/// This is a structural operator that counts top-level elements only.
+pub struct Count;
+
+impl Transform for Count {
+    fn apply(&self, value: Value) -> Result<Value> {
+        match value {
+            Value::Array(arr) => Ok(Value::Number(arr.len() as f64)),
+            Value::Text(s) => Ok(Value::Number(s.chars().count() as f64)),
+            Value::Number(_) => Ok(Value::Number(0.0)),
+        }
+    }
+}
+
 /// Select operator - selects elements by index, slice, or multi-select.
 pub struct Select {
     selection: Selection,
@@ -1101,5 +1116,48 @@ mod tests {
         let input = Value::Array(Array::from((vec![inner1, inner2], Level::Line)));
         let result = Sum.apply(input).unwrap();
         assert_eq!(result, Value::Number(10.0));
+    }
+
+    // Count tests
+
+    #[test]
+    fn count_array() {
+        let input = Value::Array(Array::from((
+            vec![text("a"), text("b"), text("c")],
+            Level::Line,
+        )));
+        let result = Count.apply(input).unwrap();
+        assert_eq!(result, Value::Number(3.0));
+    }
+
+    #[test]
+    fn count_empty_array() {
+        let input = Value::Array(Array::from((vec![], Level::Line)));
+        let result = Count.apply(input).unwrap();
+        assert_eq!(result, Value::Number(0.0));
+    }
+
+    #[test]
+    fn count_nested_arrays() {
+        let inner1 = Value::Array(Array::from((vec![text("a"), text("b")], Level::Word)));
+        let inner2 = Value::Array(Array::from((vec![text("c")], Level::Word)));
+        let input = Value::Array(Array::from((vec![inner1, inner2], Level::Line)));
+        let result = Count.apply(input).unwrap();
+        // Counts top-level elements only, not recursive
+        assert_eq!(result, Value::Number(2.0));
+    }
+
+    #[test]
+    fn count_text_returns_length() {
+        let input = text("hello");
+        let result = Count.apply(input).unwrap();
+        assert_eq!(result, Value::Number(5.0));
+    }
+
+    #[test]
+    fn count_number_returns_zero() {
+        let input = Value::Number(42.0);
+        let result = Count.apply(input).unwrap();
+        assert_eq!(result, Value::Number(0.0));
     }
 }
