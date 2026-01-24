@@ -2,6 +2,8 @@
 //!
 //! Each operator is a struct that implements either `Transform` or `Navigate`.
 
+use std::collections::HashMap;
+
 use crate::ast::Selection;
 use crate::error::{Error, Result};
 use crate::interpreter::{Context, Navigate, Transform};
@@ -186,6 +188,75 @@ impl Transform for DeleteEmpty {
                 Ok(Value::Array(arr))
             }
             other => Ok(other),
+        }
+    }
+}
+
+/// DedupeWithCounts operator - removes duplicates and counts occurrences.
+///
+/// Returns `[[count, value], ...]` sorted by count descending.
+/// For equal counts, preserves the order of first occurrence.
+pub struct DedupeWithCounts;
+
+impl Transform for DedupeWithCounts {
+    fn apply(&self, value: Value) -> Result<Value> {
+        match value {
+            Value::Array(arr) => {
+                // Count occurrences while tracking insertion order
+                let mut counts: HashMap<String, (usize, usize)> = HashMap::new();
+                let mut values: Vec<Value> = Vec::new();
+
+                for elem in arr.elements {
+                    let key = value_to_key(&elem);
+                    if let Some((count, _)) = counts.get_mut(&key) {
+                        *count += 1;
+                    } else {
+                        let order = values.len();
+                        counts.insert(key, (1, order));
+                        values.push(elem);
+                    }
+                }
+
+                // Build result: collect (count, order, value) tuples
+                let mut result: Vec<(usize, usize, Value)> = values
+                    .into_iter()
+                    .map(|v| {
+                        let key = value_to_key(&v);
+                        let (count, order) = counts[&key];
+                        (count, order, v)
+                    })
+                    .collect();
+
+                // Sort by count descending, then by insertion order ascending for ties
+                result.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+
+                // Convert to [[count, value], ...]
+                let elements: Vec<Value> = result
+                    .into_iter()
+                    .map(|(count, _, v)| {
+                        Value::Array(Array::from((
+                            vec![Value::Number(count as f64), v],
+                            Level::Word,
+                        )))
+                    })
+                    .collect();
+
+                Ok(Value::Array(Array::from((elements, Level::Line))))
+            }
+            other => Ok(other),
+        }
+    }
+}
+
+/// Convert a Value to a string key for deduplication.
+/// Uses a format that distinguishes between types.
+fn value_to_key(value: &Value) -> String {
+    match value {
+        Value::Text(s) => format!("T:{}", s),
+        Value::Number(n) => format!("N:{}", n),
+        Value::Array(arr) => {
+            let inner: Vec<String> = arr.elements.iter().map(value_to_key).collect();
+            format!("A:[{}]", inner.join(","))
         }
     }
 }
@@ -816,6 +887,120 @@ mod tests {
     fn delete_empty_non_array_is_identity() {
         let input = text("hello");
         let result = DeleteEmpty.apply(input).unwrap();
+        assert_eq!(result, text("hello"));
+    }
+
+    // DedupeWithCounts tests
+
+    #[test]
+    fn dedupe_with_counts_basic() {
+        let input = Value::Array(Array::from((
+            vec![text("a"), text("b"), text("a"), text("a"), text("b")],
+            Level::Line,
+        )));
+        let result = DedupeWithCounts.apply(input).unwrap();
+
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 2);
+                // First entry: [3, "a"]
+                match &arr.elements[0] {
+                    Value::Array(inner) => {
+                        assert_eq!(inner.len(), 2);
+                        assert_eq!(inner.elements[0], Value::Number(3.0));
+                        assert_eq!(inner.elements[1], text("a"));
+                    }
+                    _ => panic!("expected inner array"),
+                }
+                // Second entry: [2, "b"]
+                match &arr.elements[1] {
+                    Value::Array(inner) => {
+                        assert_eq!(inner.len(), 2);
+                        assert_eq!(inner.elements[0], Value::Number(2.0));
+                        assert_eq!(inner.elements[1], text("b"));
+                    }
+                    _ => panic!("expected inner array"),
+                }
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn dedupe_with_counts_preserves_order_for_ties() {
+        let input = Value::Array(Array::from((
+            vec![text("x"), text("y"), text("z")],
+            Level::Line,
+        )));
+        let result = DedupeWithCounts.apply(input).unwrap();
+
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 3);
+                // All have count 1, should preserve insertion order
+                match &arr.elements[0] {
+                    Value::Array(inner) => {
+                        assert_eq!(inner.elements[1], text("x"));
+                    }
+                    _ => panic!("expected inner array"),
+                }
+                match &arr.elements[1] {
+                    Value::Array(inner) => {
+                        assert_eq!(inner.elements[1], text("y"));
+                    }
+                    _ => panic!("expected inner array"),
+                }
+                match &arr.elements[2] {
+                    Value::Array(inner) => {
+                        assert_eq!(inner.elements[1], text("z"));
+                    }
+                    _ => panic!("expected inner array"),
+                }
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn dedupe_with_counts_numbers() {
+        let input = Value::Array(Array::from((
+            vec![Value::Number(1.0), Value::Number(2.0), Value::Number(1.0)],
+            Level::Line,
+        )));
+        let result = DedupeWithCounts.apply(input).unwrap();
+
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 2);
+                match &arr.elements[0] {
+                    Value::Array(inner) => {
+                        assert_eq!(inner.elements[0], Value::Number(2.0));
+                        assert_eq!(inner.elements[1], Value::Number(1.0));
+                    }
+                    _ => panic!("expected inner array"),
+                }
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn dedupe_with_counts_empty_array() {
+        let input = Value::Array(Array::from((vec![], Level::Line)));
+        let result = DedupeWithCounts.apply(input).unwrap();
+
+        match result {
+            Value::Array(arr) => {
+                assert!(arr.is_empty());
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn dedupe_with_counts_non_array_is_identity() {
+        let input = text("hello");
+        let result = DedupeWithCounts.apply(input).unwrap();
         assert_eq!(result, text("hello"));
     }
 }

@@ -5,7 +5,9 @@
 
 use crate::ast;
 use crate::error::Result;
-use crate::operators::{Ascend, DeleteEmpty, Descend, Join, Lowercase, Select, Split, Uppercase};
+use crate::operators::{
+    Ascend, DedupeWithCounts, DeleteEmpty, Descend, Join, Lowercase, Select, Split, Uppercase,
+};
 use crate::value::Value;
 
 /// A transform operator converts a value to a new value.
@@ -125,6 +127,7 @@ fn compile_op(op: &ast::Operator) -> Operator {
         ast::Operator::Uppercase => Operator::Transform(Box::new(Uppercase)),
         ast::Operator::Lowercase => Operator::Transform(Box::new(Lowercase)),
         ast::Operator::DeleteEmpty => Operator::Transform(Box::new(DeleteEmpty)),
+        ast::Operator::DedupeWithCounts => Operator::Transform(Box::new(DedupeWithCounts)),
         ast::Operator::Selection(sel) => Operator::Transform(Box::new(Select::new(sel.clone()))),
     }
 }

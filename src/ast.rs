@@ -21,6 +21,8 @@ pub enum Operator {
     Lowercase,
     /// `x` - delete empty elements
     DeleteEmpty,
+    /// `d` - dedupe with counts
+    DedupeWithCounts,
     /// Selection - select elements by index, slice, or multi-select
     Selection(Selection),
 }
