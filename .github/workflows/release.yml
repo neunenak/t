@@ -1,0 +1,56 @@
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+name: Release
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}-${{ matrix.target-suffix }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        arch: [x86_64, aarch64]
+        include:
+          - os: ubuntu-latest
+            target-suffix: unknown-linux-gnu
+          - os: macos-latest
+            target-suffix: apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cashapp/activate-hermit@v1
+        with:
+          cache: true
+      - id: build
+        shell: bash
+        run: |
+          export TARGET=${{ matrix.arch }}-${{ matrix.target-suffix }}
+          rustup target add "${TARGET}"
+          cross build --release --target ${TARGET}
+          export TARGET_PATH=target/${TARGET}/release/mk-${TARGET}
+          mv target/${TARGET}/release/mk ${TARGET_PATH}
+          bzip2 -f9 ${TARGET_PATH}
+          echo "TARGET_PATH=${TARGET_PATH}.bz2" >> $GITHUB_OUTPUT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mk-${{ matrix.arch }}-${{ matrix.target-suffix }}
+          path: ${{ steps.build.outputs.TARGET_PATH }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [build]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: ncipollo/release-action@v1
+        with:
+          artifacts: "mk-*.bz2"

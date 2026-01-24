@@ -1,0 +1,20 @@
+skip_lfs: true
+output:
+  - success
+  - failure
+pre-commit:
+  parallel: true
+  jobs:
+    - name: fmt
+      run: cargo fmt
+pre-push:
+  parallel: true
+  jobs:
+    - name: fmt
+      run: cargo fmt --check
+
+    - name: clippy
+      run: cargo clippy -- -D warnings
+
+    - name: test
+      run: cargo test

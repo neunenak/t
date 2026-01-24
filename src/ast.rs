@@ -1,0 +1,54 @@
+/// A programme is a sequence of operators.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Programme {
+    pub operators: Vec<Operator>,
+}
+
+/// An operator in the t language.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Operator {
+    /// `s` - split natural (split each element by its semantic level)
+    Split,
+    /// `j` - join/flatten natural
+    Join,
+    /// `@` - descend into nested structures
+    Descend,
+    /// `^` - ascend back up
+    Ascend,
+    /// `u` - uppercase
+    Uppercase,
+    /// `l` - lowercase
+    Lowercase,
+    /// `x` - delete empty elements
+    DeleteEmpty,
+    /// Selection - select elements by index, slice, or multi-select
+    Selection(Selection),
+}
+
+/// A selection is a comma-separated list of select items.
+/// It's a reduce operator that collapses an array to a subset.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Selection {
+    pub items: Vec<SelectItem>,
+}
+
+/// A single item in a selection: either an index or a slice.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SelectItem {
+    /// A single index (0-based, negative counts from end)
+    Index(i64),
+    /// A slice with optional start, end, and step
+    Slice(Slice),
+}
+
+/// A slice selects a range of elements.
+/// All fields are optional:
+/// - `start`: starting index (default: 0 or end if step is negative)
+/// - `end`: ending index, exclusive (default: end or 0 if step is negative)
+/// - `step`: stride (default: 1)
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Slice {
+    pub start: Option<i64>,
+    pub end: Option<i64>,
+    pub step: Option<i64>,
+}
