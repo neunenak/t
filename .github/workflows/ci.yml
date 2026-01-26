@@ -1,7 +1,7 @@
 on:
   push:
     branches:
-      - main
+      - master
   pull_request:
 name: CI
 jobs:
@@ -13,8 +13,7 @@ jobs:
       - uses: cashapp/activate-hermit@v1
         with:
           cache: true
-      - run: cargo fmt -- --check
-      - run: cargo clippy -- -D warnings
+      - run: just lint
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -23,5 +22,5 @@ jobs:
       - uses: cashapp/activate-hermit@v1
         with:
           cache: true
-      - run: cargo build
-      - run: cargo test
+      - run: just build
+      - run: just test

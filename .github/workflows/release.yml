@@ -28,13 +28,13 @@ jobs:
       - id: build
         shell: bash
         run: |
-          export TARGET=${{ matrix.arch }}-${{ matrix.target-suffix }}
+          export TARGET="${{ matrix.arch }}-${{ matrix.target-suffix }}"
           rustup target add "${TARGET}"
-          cross build --release --target ${TARGET}
-          export TARGET_PATH=target/${TARGET}/release/t-${TARGET}
-          mv target/${TARGET}/release/t ${TARGET_PATH}
-          bzip2 -f9 ${TARGET_PATH}
-          echo "TARGET_PATH=${TARGET_PATH}.bz2" >> $GITHUB_OUTPUT
+          cross build --release --target "${TARGET}"
+          export TARGET_PATH="target/${TARGET}/release/t-${TARGET}"
+          mv "target/${TARGET}"/release/t "${TARGET_PATH}"
+          bzip2 -f9 "${TARGET_PATH}"
+          echo "TARGET_PATH=${TARGET_PATH}.bz2" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: t-${{ matrix.arch }}-${{ matrix.target-suffix }}
