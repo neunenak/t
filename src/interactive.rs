@@ -7,7 +7,7 @@ use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
-    style::{Color, Print, ResetColor, SetForegroundColor},
+    style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor},
     terminal::{self, ClearType},
 };
 
@@ -117,19 +117,25 @@ impl InteractiveMode {
         self.draw(&mut stdout)?;
 
         loop {
-            if let Event::Key(key) = event::read().context("failed to read event")? {
-                match self.handle_key(key) {
-                    KeyAction::Continue => {}
-                    KeyAction::Commit => {
-                        self.clear_output(&mut stdout)?;
-                        return Ok(Some((self.programme.clone(), self.json_output)));
+            match event::read().context("failed to read event")? {
+                Event::Key(key) => {
+                    match self.handle_key(key) {
+                        KeyAction::Continue => {}
+                        KeyAction::Commit => {
+                            self.clear_output(&mut stdout)?;
+                            return Ok(Some((self.programme.clone(), self.json_output)));
+                        }
+                        KeyAction::Cancel => {
+                            self.clear_output(&mut stdout)?;
+                            return Ok(None);
+                        }
                     }
-                    KeyAction::Cancel => {
-                        self.clear_output(&mut stdout)?;
-                        return Ok(None);
-                    }
+                    self.draw(&mut stdout)?;
                 }
-                self.draw(&mut stdout)?;
+                Event::Resize(_, _) => {
+                    self.draw(&mut stdout)?;
+                }
+                _ => {}
             }
         }
     }
@@ -288,11 +294,17 @@ impl InteractiveMode {
 
         // Draw prompt (cursor is now on prompt line)
         let prompt = format!("t> {}", self.programme);
+        let help_hint = "^H Help";
+        let help_col = term_width.saturating_sub(help_hint.len()) as u16;
         execute!(
             stdout,
             cursor::MoveToColumn(0),
             terminal::Clear(ClearType::CurrentLine),
-            Print(&prompt)
+            Print(&prompt),
+            cursor::MoveToColumn(help_col),
+            SetForegroundColor(Color::DarkGrey),
+            Print(help_hint),
+            ResetColor
         )?;
 
         // Count lines below prompt
@@ -585,6 +597,16 @@ fn write_highlighted_json_str<W: io::Write>(w: &mut W, json: &str) -> io::Result
                 } else {
                     write!(w, "{}", word)?;
                 }
+            }
+            '[' | ']' | '{' | '}' | ':' | ',' => {
+                write!(
+                    w,
+                    "{}{}{}{}",
+                    SetForegroundColor(Color::White),
+                    SetAttribute(Attribute::Bold),
+                    c,
+                    ResetColor
+                )?;
             }
             _ => {
                 write!(w, "{}", c)?;
