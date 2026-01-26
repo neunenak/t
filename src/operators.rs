@@ -244,6 +244,71 @@ impl Transform for Uppercase {
     }
 }
 
+/// LowercaseSelected operator - lowercases only selected elements.
+pub struct LowercaseSelected {
+    selection: Selection,
+}
+
+impl LowercaseSelected {
+    pub fn new(selection: Selection) -> Self {
+        Self { selection }
+    }
+}
+
+impl Transform for LowercaseSelected {
+    fn apply(&self, value: Value) -> Result<Value> {
+        match value {
+            Value::Array(arr) => apply_to_selected(arr, &self.selection, |v| Lowercase.apply(v)),
+            other => Ok(other),
+        }
+    }
+}
+
+/// UppercaseSelected operator - uppercases only selected elements.
+pub struct UppercaseSelected {
+    selection: Selection,
+}
+
+impl UppercaseSelected {
+    pub fn new(selection: Selection) -> Self {
+        Self { selection }
+    }
+}
+
+impl Transform for UppercaseSelected {
+    fn apply(&self, value: Value) -> Result<Value> {
+        match value {
+            Value::Array(arr) => apply_to_selected(arr, &self.selection, |v| Uppercase.apply(v)),
+            other => Ok(other),
+        }
+    }
+}
+
+/// Apply a transform function to selected elements of an array.
+fn apply_to_selected<F>(arr: Array, selection: &Selection, transform: F) -> Result<Value>
+where
+    F: Fn(Value) -> Result<Value>,
+{
+    let len = arr.len() as i64;
+    let selected: std::collections::HashSet<usize> =
+        selection_indices(selection, len).into_iter().collect();
+
+    let elements: Result<Vec<Value>> = arr
+        .elements
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| {
+            if selected.contains(&i) {
+                transform(v)
+            } else {
+                Ok(v)
+            }
+        })
+        .collect();
+
+    Ok(Value::Array(Array::from((elements?, arr.level))))
+}
+
 /// Descend operator - increments depth to operate on nested elements.
 pub struct Descend;
 
@@ -472,42 +537,22 @@ fn extract_key(elem: &Value, selection: &Selection) -> Result<Value> {
     match elem {
         Value::Array(arr) => {
             let len = arr.len() as i64;
+            let indices = selection_indices(selection, len);
 
             // Single index returns the element directly as key
-            if selection.items.len() == 1
-                && let crate::ast::SelectItem::Index(idx) = &selection.items[0]
-            {
-                let actual = normalize_index(*idx, len);
+            if indices.len() == 1 {
                 return arr
                     .elements
-                    .get(actual as usize)
+                    .get(indices[0])
                     .map(|v| v.deep_copy())
-                    .ok_or_else(|| Error::runtime(format!("index {} out of bounds", idx)));
+                    .ok_or_else(|| Error::runtime("index out of bounds"));
             }
 
-            // Multiple items or slices return an array as composite key
-            let mut result = Vec::new();
-            for item in &selection.items {
-                match item {
-                    crate::ast::SelectItem::Index(idx) => {
-                        let actual = normalize_index(*idx, len);
-                        if actual >= 0
-                            && actual < len
-                            && let Some(v) = arr.elements.get(actual as usize)
-                        {
-                            result.push(v.deep_copy());
-                        }
-                    }
-                    crate::ast::SelectItem::Slice(slice) => {
-                        let indices = compute_slice_indices(slice, len);
-                        for i in indices {
-                            if let Some(v) = arr.elements.get(i) {
-                                result.push(v.deep_copy());
-                            }
-                        }
-                    }
-                }
-            }
+            // Multiple indices return an array as composite key
+            let result: Vec<Value> = indices
+                .iter()
+                .filter_map(|&i| arr.elements.get(i).map(|v| v.deep_copy()))
+                .collect();
             Ok(Value::Array(Array::from((result, arr.level))))
         }
         // For non-array elements, just return a copy as the key
@@ -577,42 +622,22 @@ impl Transform for Select {
 /// Select elements from an array based on a selection.
 fn select_from_array(arr: Array, selection: &Selection) -> Result<Value> {
     let len = arr.len() as i64;
+    let indices = selection_indices(selection, len);
 
     // Single index returns the element directly
-    if selection.items.len() == 1
-        && let crate::ast::SelectItem::Index(idx) = &selection.items[0]
-    {
-        let actual = normalize_index(*idx, len);
+    if indices.len() == 1 {
         return arr
             .elements
             .into_iter()
-            .nth(actual as usize)
-            .ok_or_else(|| Error::runtime(format!("index {} out of bounds", idx)));
+            .nth(indices[0])
+            .ok_or_else(|| Error::runtime("index out of bounds"));
     }
 
-    // Multiple items or slices return an array
-    let mut result = Vec::new();
-    for item in &selection.items {
-        match item {
-            crate::ast::SelectItem::Index(idx) => {
-                let actual = normalize_index(*idx, len);
-                if actual >= 0
-                    && actual < len
-                    && let Some(v) = arr.elements.get(actual as usize)
-                {
-                    result.push(v.deep_copy());
-                }
-            }
-            crate::ast::SelectItem::Slice(slice) => {
-                let indices = compute_slice_indices(slice, len);
-                for i in indices {
-                    if let Some(v) = arr.elements.get(i) {
-                        result.push(v.deep_copy());
-                    }
-                }
-            }
-        }
-    }
+    // Multiple indices return an array
+    let result: Vec<Value> = indices
+        .iter()
+        .filter_map(|&i| arr.elements.get(i).map(|v| v.deep_copy()))
+        .collect();
 
     Ok(Value::Array(Array::from((result, arr.level))))
 }
@@ -621,41 +646,18 @@ fn select_from_array(arr: Array, selection: &Selection) -> Result<Value> {
 fn select_from_string(s: &str, selection: &Selection) -> Result<Value> {
     let chars: Vec<char> = s.chars().collect();
     let len = chars.len() as i64;
+    let indices = selection_indices(selection, len);
 
     // Single index returns a single-char string
-    if selection.items.len() == 1
-        && let crate::ast::SelectItem::Index(idx) = &selection.items[0]
-    {
-        let actual = normalize_index(*idx, len);
+    if indices.len() == 1 {
         return chars
-            .get(actual as usize)
+            .get(indices[0])
             .map(|c| Value::Text(c.to_string()))
-            .ok_or_else(|| Error::runtime(format!("index {} out of bounds", idx)));
+            .ok_or_else(|| Error::runtime("index out of bounds"));
     }
 
-    // Multiple items or slices return a string
-    let mut result = String::new();
-    for item in &selection.items {
-        match item {
-            crate::ast::SelectItem::Index(idx) => {
-                let actual = normalize_index(*idx, len);
-                if actual >= 0
-                    && actual < len
-                    && let Some(c) = chars.get(actual as usize)
-                {
-                    result.push(*c);
-                }
-            }
-            crate::ast::SelectItem::Slice(slice) => {
-                let indices = compute_slice_indices(slice, len);
-                for i in indices {
-                    if let Some(c) = chars.get(i) {
-                        result.push(*c);
-                    }
-                }
-            }
-        }
-    }
+    // Multiple indices return a string
+    let result: String = indices.iter().filter_map(|&i| chars.get(i)).collect();
 
     Ok(Value::Text(result))
 }
@@ -700,6 +702,26 @@ fn compute_slice_indices(slice: &crate::ast::Slice, len: i64) -> Vec<usize> {
         }
     }
 
+    indices
+}
+
+/// Compute all indices selected by a selection, preserving order.
+/// Returns indices in the order they appear in the selection.
+fn selection_indices(selection: &Selection, len: i64) -> Vec<usize> {
+    let mut indices = Vec::new();
+    for item in &selection.items {
+        match item {
+            crate::ast::SelectItem::Index(idx) => {
+                let actual = normalize_index(*idx, len);
+                if actual >= 0 && actual < len {
+                    indices.push(actual as usize);
+                }
+            }
+            crate::ast::SelectItem::Slice(slice) => {
+                indices.extend(compute_slice_indices(slice, len));
+            }
+        }
+    }
     indices
 }
 
@@ -913,6 +935,131 @@ mod tests {
         let input = text("hello");
         let result = JoinDelim::new(",".to_string()).apply(input).unwrap();
         assert_eq!(result, text("hello"));
+    }
+
+    // LowercaseSelected tests
+
+    #[test]
+    fn lowercase_selected_single_index() {
+        let input = line_array(&["HELLO", "WORLD", "FOO"]);
+        let sel = Selection {
+            items: vec![SelectItem::Index(0)],
+        };
+        let result = LowercaseSelected::new(sel).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.elements[0], text("hello"));
+                assert_eq!(arr.elements[1], text("WORLD"));
+                assert_eq!(arr.elements[2], text("FOO"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn lowercase_selected_slice() {
+        let input = line_array(&["HELLO", "WORLD", "FOO"]);
+        let sel = Selection {
+            items: vec![SelectItem::Slice(Slice {
+                start: None,
+                end: Some(2),
+                step: None,
+            })],
+        };
+        let result = LowercaseSelected::new(sel).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.elements[0], text("hello"));
+                assert_eq!(arr.elements[1], text("world"));
+                assert_eq!(arr.elements[2], text("FOO"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn lowercase_selected_multi_index() {
+        let input = line_array(&["HELLO", "WORLD", "FOO", "BAR"]);
+        let sel = Selection {
+            items: vec![SelectItem::Index(0), SelectItem::Index(2)],
+        };
+        let result = LowercaseSelected::new(sel).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.elements[0], text("hello"));
+                assert_eq!(arr.elements[1], text("WORLD"));
+                assert_eq!(arr.elements[2], text("foo"));
+                assert_eq!(arr.elements[3], text("BAR"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn lowercase_selected_negative_index() {
+        let input = line_array(&["HELLO", "WORLD", "FOO"]);
+        let sel = Selection {
+            items: vec![SelectItem::Index(-1)],
+        };
+        let result = LowercaseSelected::new(sel).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.elements[0], text("HELLO"));
+                assert_eq!(arr.elements[1], text("WORLD"));
+                assert_eq!(arr.elements[2], text("foo"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn lowercase_selected_non_array_is_identity() {
+        let input = text("HELLO");
+        let sel = Selection {
+            items: vec![SelectItem::Index(0)],
+        };
+        let result = LowercaseSelected::new(sel).apply(input).unwrap();
+        assert_eq!(result, text("HELLO"));
+    }
+
+    // UppercaseSelected tests
+
+    #[test]
+    fn uppercase_selected_single_index() {
+        let input = line_array(&["hello", "world", "foo"]);
+        let sel = Selection {
+            items: vec![SelectItem::Index(0)],
+        };
+        let result = UppercaseSelected::new(sel).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.elements[0], text("HELLO"));
+                assert_eq!(arr.elements[1], text("world"));
+                assert_eq!(arr.elements[2], text("foo"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn uppercase_selected_slice() {
+        let input = line_array(&["hello", "world", "foo"]);
+        let sel = Selection {
+            items: vec![SelectItem::Slice(Slice {
+                start: Some(1),
+                end: None,
+                step: None,
+            })],
+        };
+        let result = UppercaseSelected::new(sel).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.elements[0], text("hello"));
+                assert_eq!(arr.elements[1], text("WORLD"));
+                assert_eq!(arr.elements[2], text("FOO"));
+            }
+            _ => panic!("expected array"),
+        }
     }
 
     // Join tests

@@ -38,6 +38,8 @@ fn operator(input: &mut &str) -> ModalResult<Operator> {
         simple_op,
         split_delim_op,
         join_delim_op,
+        lowercase_selected_op,
+        uppercase_selected_op,
         filter_op,
         group_by_op,
         selection_op,
@@ -89,6 +91,28 @@ fn join_delim_op(input: &mut &str) -> ModalResult<Operator> {
         )))
         .parse_next(input)?;
     Ok(Operator::JoinDelim(delim))
+}
+
+/// Parser for lowercase selected operator: `L<selection>`
+fn lowercase_selected_op(input: &mut &str) -> ModalResult<Operator> {
+    'L'.parse_next(input)?;
+    let sel = cut_err(selection)
+        .context(StrContext::Expected(StrContextValue::Description(
+            "<selection>",
+        )))
+        .parse_next(input)?;
+    Ok(Operator::LowercaseSelected(sel))
+}
+
+/// Parser for uppercase selected operator: `U<selection>`
+fn uppercase_selected_op(input: &mut &str) -> ModalResult<Operator> {
+    'U'.parse_next(input)?;
+    let sel = cut_err(selection)
+        .context(StrContext::Expected(StrContextValue::Description(
+            "<selection>",
+        )))
+        .parse_next(input)?;
+    Ok(Operator::UppercaseSelected(sel))
 }
 
 /// Parse a non-empty quoted string (for delimiters that can't be empty).
@@ -856,6 +880,66 @@ mod tests {
     #[test]
     fn join_delim_missing_delimiter_error() {
         let result = parse_programme("J");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn lowercase_selected_single_index() {
+        let result = parse_programme("L0").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::LowercaseSelected(Selection {
+                items: vec![SelectItem::Index(0)]
+            })]
+        );
+    }
+
+    #[test]
+    fn lowercase_selected_slice() {
+        let result = parse_programme("L:2").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::LowercaseSelected(Selection {
+                items: vec![SelectItem::Slice(Slice {
+                    start: None,
+                    end: Some(2),
+                    step: None,
+                })]
+            })]
+        );
+    }
+
+    #[test]
+    fn lowercase_selected_multi() {
+        let result = parse_programme("L0,2").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::LowercaseSelected(Selection {
+                items: vec![SelectItem::Index(0), SelectItem::Index(2)]
+            })]
+        );
+    }
+
+    #[test]
+    fn lowercase_selected_missing_selection_error() {
+        let result = parse_programme("L");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn uppercase_selected_single_index() {
+        let result = parse_programme("U0").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::UppercaseSelected(Selection {
+                items: vec![SelectItem::Index(0)]
+            })]
+        );
+    }
+
+    #[test]
+    fn uppercase_selected_missing_selection_error() {
+        let result = parse_programme("U");
         assert!(result.is_err());
     }
 }

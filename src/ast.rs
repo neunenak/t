@@ -21,8 +21,12 @@ pub enum Operator {
     Ascend,
     /// `u` - uppercase
     Uppercase,
+    /// `U<selection>` - uppercase selected elements
+    UppercaseSelected(Selection),
     /// `l` - lowercase
     Lowercase,
+    /// `L<selection>` - lowercase selected elements
+    LowercaseSelected(Selection),
     /// `x` - delete empty elements
     DeleteEmpty,
     /// `d` - dedupe with counts

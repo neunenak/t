@@ -9,7 +9,8 @@ use crate::ast;
 use crate::error::{Error, Result};
 use crate::operators::{
     Ascend, Count, DedupeWithCounts, DeleteEmpty, Descend, Filter, GroupBy, Join, JoinDelim,
-    Lowercase, Select, SortAscending, SortDescending, Split, SplitDelim, Sum, Trim, Uppercase,
+    Lowercase, LowercaseSelected, Select, SortAscending, SortDescending, Split, SplitDelim, Sum,
+    Trim, Uppercase, UppercaseSelected,
 };
 use crate::value::Value;
 
@@ -138,7 +139,13 @@ fn compile_op(op: &ast::Operator) -> Result<Operator> {
         ast::Operator::Descend => Operator::Navigate(Box::new(Descend)),
         ast::Operator::Ascend => Operator::Navigate(Box::new(Ascend)),
         ast::Operator::Uppercase => Operator::Transform(Box::new(Uppercase)),
+        ast::Operator::UppercaseSelected(sel) => {
+            Operator::Transform(Box::new(UppercaseSelected::new(sel.clone())))
+        }
         ast::Operator::Lowercase => Operator::Transform(Box::new(Lowercase)),
+        ast::Operator::LowercaseSelected(sel) => {
+            Operator::Transform(Box::new(LowercaseSelected::new(sel.clone())))
+        }
         ast::Operator::Trim => Operator::Transform(Box::new(Trim)),
         ast::Operator::DeleteEmpty => Operator::Transform(Box::new(DeleteEmpty)),
         ast::Operator::DedupeWithCounts => Operator::Transform(Box::new(DedupeWithCounts)),
