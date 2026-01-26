@@ -224,6 +224,26 @@ impl Transform for Trim {
     }
 }
 
+/// TrimSelected operator - trims only selected elements.
+pub struct TrimSelected {
+    selection: Selection,
+}
+
+impl TrimSelected {
+    pub fn new(selection: Selection) -> Self {
+        Self { selection }
+    }
+}
+
+impl Transform for TrimSelected {
+    fn apply(&self, value: Value) -> Result<Value> {
+        match value {
+            Value::Array(arr) => apply_to_selected(arr, &self.selection, |v| Trim.apply(v)),
+            other => Ok(other),
+        }
+    }
+}
+
 /// Uppercase operator - converts text to uppercase.
 pub struct Uppercase;
 
@@ -498,6 +518,32 @@ fn value_to_key(value: &Value) -> String {
         Value::Array(arr) => {
             let inner: Vec<String> = arr.elements.iter().map(value_to_key).collect();
             format!("A:[{}]", inner.join(","))
+        }
+    }
+}
+
+/// Dedupe operator - removes duplicates, keeping first occurrence.
+///
+/// Returns unique values in order of first occurrence.
+pub struct Dedupe;
+
+impl Transform for Dedupe {
+    fn apply(&self, value: Value) -> Result<Value> {
+        match value {
+            Value::Array(arr) => {
+                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+                let mut result: Vec<Value> = Vec::new();
+
+                for elem in arr.elements {
+                    let key = value_to_key(&elem);
+                    if seen.insert(key) {
+                        result.push(elem);
+                    }
+                }
+
+                Ok(Value::Array(Array::from((result, arr.level))))
+            }
+            other => Ok(other),
         }
     }
 }
@@ -2675,6 +2721,227 @@ mod tests {
             items: vec![SelectItem::Index(0)],
         };
         let result = ToNumberSelected::new(sel).apply(input).unwrap();
+        assert_eq!(result, text("hello"));
+    }
+
+    // TrimSelected tests
+
+    #[test]
+    fn trim_selected_single_index() {
+        let input = Value::Array(Array::from((
+            vec![text("  hello  "), text("  world  "), text("  foo  ")],
+            Level::Line,
+        )));
+        let sel = Selection {
+            items: vec![SelectItem::Index(0)],
+        };
+        let result = TrimSelected::new(sel).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.elements[0], text("hello"));
+                assert_eq!(arr.elements[1], text("  world  "));
+                assert_eq!(arr.elements[2], text("  foo  "));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn trim_selected_slice() {
+        let input = Value::Array(Array::from((
+            vec![text("  hello  "), text("  world  "), text("  foo  ")],
+            Level::Line,
+        )));
+        let sel = Selection {
+            items: vec![SelectItem::Slice(Slice {
+                start: Some(1),
+                end: None,
+                step: None,
+            })],
+        };
+        let result = TrimSelected::new(sel).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.elements[0], text("  hello  "));
+                assert_eq!(arr.elements[1], text("world"));
+                assert_eq!(arr.elements[2], text("foo"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn trim_selected_multi_index() {
+        let input = Value::Array(Array::from((
+            vec![
+                text("  hello  "),
+                text("  world  "),
+                text("  foo  "),
+                text("  bar  "),
+            ],
+            Level::Line,
+        )));
+        let sel = Selection {
+            items: vec![SelectItem::Index(0), SelectItem::Index(2)],
+        };
+        let result = TrimSelected::new(sel).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.elements[0], text("hello"));
+                assert_eq!(arr.elements[1], text("  world  "));
+                assert_eq!(arr.elements[2], text("foo"));
+                assert_eq!(arr.elements[3], text("  bar  "));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn trim_selected_negative_index() {
+        let input = Value::Array(Array::from((
+            vec![text("  hello  "), text("  world  "), text("  foo  ")],
+            Level::Line,
+        )));
+        let sel = Selection {
+            items: vec![SelectItem::Index(-1)],
+        };
+        let result = TrimSelected::new(sel).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.elements[0], text("  hello  "));
+                assert_eq!(arr.elements[1], text("  world  "));
+                assert_eq!(arr.elements[2], text("foo"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn trim_selected_non_array_is_identity() {
+        let input = text("  hello  ");
+        let sel = Selection {
+            items: vec![SelectItem::Index(0)],
+        };
+        let result = TrimSelected::new(sel).apply(input).unwrap();
+        assert_eq!(result, text("  hello  "));
+    }
+
+    // Dedupe tests
+
+    #[test]
+    fn dedupe_basic() {
+        let input = Value::Array(Array::from((
+            vec![text("a"), text("b"), text("a"), text("a"), text("b")],
+            Level::Line,
+        )));
+        let result = Dedupe.apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 2);
+                assert_eq!(arr.elements[0], text("a"));
+                assert_eq!(arr.elements[1], text("b"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn dedupe_preserves_first_occurrence_order() {
+        let input = Value::Array(Array::from((
+            vec![text("x"), text("y"), text("z"), text("x"), text("y")],
+            Level::Line,
+        )));
+        let result = Dedupe.apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 3);
+                assert_eq!(arr.elements[0], text("x"));
+                assert_eq!(arr.elements[1], text("y"));
+                assert_eq!(arr.elements[2], text("z"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn dedupe_numbers() {
+        let input = Value::Array(Array::from((
+            vec![Value::Number(1.0), Value::Number(2.0), Value::Number(1.0)],
+            Level::Line,
+        )));
+        let result = Dedupe.apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 2);
+                assert_eq!(arr.elements[0], Value::Number(1.0));
+                assert_eq!(arr.elements[1], Value::Number(2.0));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn dedupe_empty_array() {
+        let input = Value::Array(Array::from((vec![], Level::Line)));
+        let result = Dedupe.apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert!(arr.is_empty());
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn dedupe_all_unique() {
+        let input = Value::Array(Array::from((
+            vec![text("a"), text("b"), text("c")],
+            Level::Line,
+        )));
+        let result = Dedupe.apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 3);
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn dedupe_all_same() {
+        let input = Value::Array(Array::from((
+            vec![text("a"), text("a"), text("a")],
+            Level::Line,
+        )));
+        let result = Dedupe.apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 1);
+                assert_eq!(arr.elements[0], text("a"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn dedupe_preserves_level() {
+        let input = Value::Array(Array::from((
+            vec![text("a"), text("b"), text("a")],
+            Level::Word,
+        )));
+        let result = Dedupe.apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.level, Level::Word);
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn dedupe_non_array_is_identity() {
+        let input = text("hello");
+        let result = Dedupe.apply(input).unwrap();
         assert_eq!(result, text("hello"));
     }
 }

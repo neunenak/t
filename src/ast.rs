@@ -37,16 +37,20 @@ pub enum Operator {
     ToNumber,
     /// `N<selection>` - convert to number selected elements
     ToNumberSelected(Selection),
+    /// `t` - trim whitespace
+    Trim,
+    /// `T<selection>` - trim selected elements
+    TrimSelected(Selection),
     /// `x` - delete empty elements
     DeleteEmpty,
     /// `d` - dedupe with counts
     DedupeWithCounts,
+    /// `D` - dedupe (without counts)
+    Dedupe,
     /// `+` - sum numeric values
     Sum,
     /// `#` - count elements
     Count,
-    /// `t` - trim whitespace
-    Trim,
     /// `o` - sort descending
     SortDescending,
     /// `O` - sort ascending

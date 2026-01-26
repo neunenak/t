@@ -8,9 +8,9 @@ use regex::Regex;
 use crate::ast;
 use crate::error::{Error, Result};
 use crate::operators::{
-    Ascend, Count, DedupeWithCounts, DeleteEmpty, Descend, Filter, GroupBy, Join, JoinDelim,
-    Lowercase, LowercaseSelected, Replace, Select, SortAscending, SortDescending, Split,
-    SplitDelim, Sum, ToNumber, ToNumberSelected, Trim, Uppercase, UppercaseSelected,
+    Ascend, Count, Dedupe, DedupeWithCounts, DeleteEmpty, Descend, Filter, GroupBy, Join,
+    JoinDelim, Lowercase, LowercaseSelected, Replace, Select, SortAscending, SortDescending, Split,
+    SplitDelim, Sum, ToNumber, ToNumberSelected, Trim, TrimSelected, Uppercase, UppercaseSelected,
 };
 use crate::value::Value;
 
@@ -164,8 +164,12 @@ fn compile_op(op: &ast::Operator) -> Result<Operator> {
             )))
         }
         ast::Operator::Trim => Operator::Transform(Box::new(Trim)),
+        ast::Operator::TrimSelected(sel) => {
+            Operator::Transform(Box::new(TrimSelected::new(sel.clone())))
+        }
         ast::Operator::DeleteEmpty => Operator::Transform(Box::new(DeleteEmpty)),
         ast::Operator::DedupeWithCounts => Operator::Transform(Box::new(DedupeWithCounts)),
+        ast::Operator::Dedupe => Operator::Transform(Box::new(Dedupe)),
         ast::Operator::Sum => Operator::Transform(Box::new(Sum)),
         ast::Operator::Count => Operator::Transform(Box::new(Count)),
         ast::Operator::SortDescending => Operator::Transform(Box::new(SortDescending)),

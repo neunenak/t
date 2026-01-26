@@ -41,6 +41,7 @@ fn operator(input: &mut &str) -> ModalResult<Operator> {
         lowercase_selected_op,
         uppercase_selected_op,
         to_number_selected_op,
+        trim_selected_op,
         replace_op,
         filter_op,
         group_by_op,
@@ -52,7 +53,7 @@ fn operator(input: &mut &str) -> ModalResult<Operator> {
 /// Parser for simple single-character operators.
 fn simple_op(input: &mut &str) -> ModalResult<Operator> {
     one_of((
-        's', 'j', '@', '^', 'u', 'l', 't', 'n', 'x', 'd', '+', '#', 'o', 'O',
+        's', 'j', '@', '^', 'u', 'l', 't', 'n', 'x', 'd', 'D', '+', '#', 'o', 'O',
     ))
     .map(|c| match c {
         's' => Operator::Split,
@@ -65,6 +66,7 @@ fn simple_op(input: &mut &str) -> ModalResult<Operator> {
         'n' => Operator::ToNumber,
         'x' => Operator::DeleteEmpty,
         'd' => Operator::DedupeWithCounts,
+        'D' => Operator::Dedupe,
         '+' => Operator::Sum,
         '#' => Operator::Count,
         'o' => Operator::SortDescending,
@@ -127,6 +129,17 @@ fn to_number_selected_op(input: &mut &str) -> ModalResult<Operator> {
         )))
         .parse_next(input)?;
     Ok(Operator::ToNumberSelected(sel))
+}
+
+/// Parser for trim selected operator: `T<selection>`
+fn trim_selected_op(input: &mut &str) -> ModalResult<Operator> {
+    'T'.parse_next(input)?;
+    let sel = cut_err(selection)
+        .context(StrContext::Expected(StrContextValue::Description(
+            "<selection>",
+        )))
+        .parse_next(input)?;
+    Ok(Operator::TrimSelected(sel))
 }
 
 /// Parser for replace operator: `r[<selection>]/<old>/<new>/`
@@ -1144,6 +1157,78 @@ mod tests {
                 }),
                 Operator::Lowercase,
             ]
+        );
+    }
+
+    #[test]
+    fn trim_selected_single_index() {
+        let result = parse_programme("T0").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::TrimSelected(Selection {
+                items: vec![SelectItem::Index(0)]
+            })]
+        );
+    }
+
+    #[test]
+    fn trim_selected_slice() {
+        let result = parse_programme("T:2").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::TrimSelected(Selection {
+                items: vec![SelectItem::Slice(Slice {
+                    start: None,
+                    end: Some(2),
+                    step: None,
+                })]
+            })]
+        );
+    }
+
+    #[test]
+    fn trim_selected_multi() {
+        let result = parse_programme("T0,2").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::TrimSelected(Selection {
+                items: vec![SelectItem::Index(0), SelectItem::Index(2)]
+            })]
+        );
+    }
+
+    #[test]
+    fn trim_selected_missing_selection_error() {
+        let result = parse_programme("T");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn trim_selected_followed_by_ops() {
+        let result = parse_programme("T0l").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![
+                Operator::TrimSelected(Selection {
+                    items: vec![SelectItem::Index(0)]
+                }),
+                Operator::Lowercase,
+            ]
+        );
+    }
+
+    #[test]
+    fn dedupe_simple() {
+        let result = parse_programme("D").unwrap();
+        assert_eq!(result.operators, vec![Operator::Dedupe]);
+    }
+
+    #[test]
+    fn dedupe_in_sequence() {
+        let result = parse_programme("sDO").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::Split, Operator::Dedupe, Operator::SortAscending]
         );
     }
 }
