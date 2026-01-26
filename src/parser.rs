@@ -34,7 +34,14 @@ fn programme(input: &mut &str) -> ModalResult<Programme> {
 
 /// Parser for a single operator.
 fn operator(input: &mut &str) -> ModalResult<Operator> {
-    alt((simple_op, filter_op, group_by_op, selection_op)).parse_next(input)
+    alt((
+        simple_op,
+        split_delim_op,
+        filter_op,
+        group_by_op,
+        selection_op,
+    ))
+    .parse_next(input)
 }
 
 /// Parser for simple single-character operators.
@@ -59,6 +66,132 @@ fn simple_op(input: &mut &str) -> ModalResult<Operator> {
         _ => unreachable!(),
     })
     .parse_next(input)
+}
+
+/// Parser for split delimiter operator: `S<char>` or `S"<delim>"`
+fn split_delim_op(input: &mut &str) -> ModalResult<Operator> {
+    'S'.parse_next(input)?;
+    let delim = cut_err(alt((non_empty_quoted_string, single_char_delim)))
+        .context(StrContext::Expected(StrContextValue::Description(
+            "<delimiter>",
+        )))
+        .parse_next(input)?;
+    Ok(Operator::SplitDelim(delim))
+}
+
+/// Parse a non-empty quoted string (for delimiters that can't be empty).
+fn non_empty_quoted_string(input: &mut &str) -> ModalResult<String> {
+    // Check for empty string "" before consuming
+    if input.starts_with("\"\"") {
+        // Consume just the first quote so error points at the right place
+        '"'.parse_next(input)?;
+        return cut_err(winnow::combinator::fail)
+            .context(StrContext::Expected(StrContextValue::Description(
+                "non-empty delimiter",
+            )))
+            .parse_next(input);
+    }
+    quoted_string(input)
+}
+
+/// Parse a quoted string with escape sequences.
+/// Supports: \\ \n \r \t \" \' \0 \xNN \uNNNN
+fn quoted_string(input: &mut &str) -> ModalResult<String> {
+    '"'.parse_next(input)?;
+    let mut result = String::new();
+    loop {
+        // Take characters until we hit a backslash or closing quote
+        let chunk: &str = take_till(0.., ('\\', '"')).parse_next(input)?;
+        result.push_str(chunk);
+
+        // Check what we hit
+        if input.starts_with('"') {
+            // End of string
+            '"'.parse_next(input)?;
+            return Ok(result);
+        } else if input.starts_with('\\') {
+            // Escape sequence
+            '\\'.parse_next(input)?;
+            let escaped = cut_err(parse_escape_char)
+                .context(StrContext::Expected(StrContextValue::Description(
+                    "escape sequence",
+                )))
+                .parse_next(input)?;
+            result.push(escaped);
+        } else {
+            // End of input without closing quote
+            return cut_err('"')
+                .context(StrContext::Expected(StrContextValue::Description(
+                    "closing '\"'",
+                )))
+                .parse_next(input)
+                .map(|_| result);
+        }
+    }
+}
+
+/// Parse the character after a backslash in an escape sequence.
+fn parse_escape_char(input: &mut &str) -> ModalResult<char> {
+    let c = winnow::token::any.parse_next(input)?;
+    match c {
+        '\\' => Ok('\\'),
+        '"' => Ok('"'),
+        '\'' => Ok('\''),
+        'n' => Ok('\n'),
+        'r' => Ok('\r'),
+        't' => Ok('\t'),
+        '0' => Ok('\0'),
+        'x' => parse_hex_escape(input),
+        'u' => parse_unicode_escape(input),
+        _ => cut_err(winnow::combinator::fail)
+            .context(StrContext::Expected(StrContextValue::Description(
+                "valid escape sequence (\\n, \\r, \\t, \\0, \\\\, \\\", \\', \\xNN, \\uNNNN)",
+            )))
+            .parse_next(input),
+    }
+}
+
+/// Parse a hex escape: \xNN (exactly 2 hex digits).
+fn parse_hex_escape(input: &mut &str) -> ModalResult<char> {
+    let digits: &str = cut_err(winnow::token::take(2usize))
+        .context(StrContext::Expected(StrContextValue::Description(
+            "2 hex digits",
+        )))
+        .parse_next(input)?;
+    let code = u32::from_str_radix(digits, 16).ok();
+    match code.and_then(char::from_u32) {
+        Some(c) => Ok(c),
+        None => cut_err(winnow::combinator::fail)
+            .context(StrContext::Expected(StrContextValue::Description(
+                "valid hex digits",
+            )))
+            .parse_next(input),
+    }
+}
+
+/// Parse a unicode escape: \uNNNN (exactly 4 hex digits).
+fn parse_unicode_escape(input: &mut &str) -> ModalResult<char> {
+    let digits: &str = cut_err(winnow::token::take(4usize))
+        .context(StrContext::Expected(StrContextValue::Description(
+            "4 hex digits",
+        )))
+        .parse_next(input)?;
+    let code = u32::from_str_radix(digits, 16).ok();
+    match code.and_then(char::from_u32) {
+        Some(c) => Ok(c),
+        None => cut_err(winnow::combinator::fail)
+            .context(StrContext::Expected(StrContextValue::Description(
+                "valid unicode code point",
+            )))
+            .parse_next(input),
+    }
+}
+
+/// Parse a single character as a delimiter.
+fn single_char_delim(input: &mut &str) -> ModalResult<String> {
+    winnow::token::any
+        .map(|c: char| c.to_string())
+        .parse_next(input)
 }
 
 /// Parser for filter operator: `/<regex>/` or `!/<regex>/`
@@ -523,5 +656,149 @@ mod tests {
             result,
             Err("parse error: expected closing '/'\n  /foo\n      ^".to_string())
         );
+    }
+
+    #[test]
+    fn split_delim_single_char() {
+        let result = parse_programme("S,").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim(",".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_delim_colon() {
+        let result = parse_programme("S:").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim(":".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_delim_quoted_multi_char() {
+        let result = parse_programme(r#"S"::""#).unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim("::".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_delim_quoted_single_char() {
+        let result = parse_programme(r#"S",""#).unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim(",".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_delim_empty_string_error() {
+        let result = parse_programme(r#"S"""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn split_delim_escape_newline() {
+        let result = parse_programme(r#"S"\n""#).unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim("\n".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_delim_escape_tab() {
+        let result = parse_programme(r#"S"\t""#).unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim("\t".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_delim_escape_backslash() {
+        let result = parse_programme(r#"S"\\""#).unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim("\\".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_delim_escape_quote() {
+        let result = parse_programme(r#"S"\"""#).unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim("\"".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_delim_escape_hex() {
+        let result = parse_programme(r#"S"\x41""#).unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim("A".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_delim_escape_unicode() {
+        let result = parse_programme(r#"S"\u0041""#).unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim("A".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_delim_combined_escapes() {
+        let result = parse_programme(r#"S"\t\n\r""#).unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim("\t\n\r".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_delim_followed_by_ops() {
+        let result = parse_programme("S,l").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::SplitDelim(",".to_string()), Operator::Lowercase,]
+        );
+    }
+
+    #[test]
+    fn split_delim_missing_delimiter_error() {
+        let result = parse_programme("S");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn split_delim_unclosed_quote_error() {
+        let result = parse_programme(r#"S"foo"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn split_delim_invalid_escape_error() {
+        let result = parse_programme(r#"S"\q""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn split_delim_invalid_hex_error() {
+        let result = parse_programme(r#"S"\xGG""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn split_delim_short_unicode_error() {
+        let result = parse_programme(r#"S"\u41""#);
+        assert!(result.is_err());
     }
 }

@@ -9,6 +9,8 @@ pub struct Programme {
 pub enum Operator {
     /// `s` - split natural (split each element by its semantic level)
     Split,
+    /// `S<delim>` - split on a custom delimiter
+    SplitDelim(String),
     /// `j` - join/flatten natural
     Join,
     /// `@` - descend into nested structures

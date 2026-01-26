@@ -56,6 +56,40 @@ fn split_text(s: &str, level: Level) -> Value {
     Value::Array(Array::from((elements, new_level)))
 }
 
+/// SplitDelim operator - splits text on a custom delimiter.
+pub struct SplitDelim {
+    delimiter: String,
+}
+
+impl SplitDelim {
+    pub fn new(delimiter: String) -> Self {
+        Self { delimiter }
+    }
+}
+
+impl Transform for SplitDelim {
+    fn apply(&self, value: Value) -> Result<Value> {
+        match value {
+            Value::Array(mut arr) => {
+                arr.elements = arr
+                    .elements
+                    .into_iter()
+                    .map(|v| self.apply(v))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(Value::Array(arr))
+            }
+            Value::Text(s) => {
+                let parts: Vec<Value> = s
+                    .split(&self.delimiter)
+                    .map(|part| Value::Text(part.to_string()))
+                    .collect();
+                Ok(Value::Array(Array::from((parts, Level::Word))))
+            }
+            Value::Number(n) => Ok(Value::Number(n)),
+        }
+    }
+}
+
 /// Join operator - joins arrays by semantic level and flattens.
 ///
 /// - Array of arrays: flatten one level, return array
@@ -701,6 +735,99 @@ mod tests {
             }
             _ => panic!("expected array"),
         }
+    }
+
+    // SplitDelim tests
+
+    #[test]
+    fn split_delim_comma() {
+        let input = text("a,b,c");
+        let result = SplitDelim::new(",".to_string()).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 3);
+                assert_eq!(arr.elements[0], text("a"));
+                assert_eq!(arr.elements[1], text("b"));
+                assert_eq!(arr.elements[2], text("c"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn split_delim_multi_char() {
+        let input = text("a::b::c");
+        let result = SplitDelim::new("::".to_string()).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 3);
+                assert_eq!(arr.elements[0], text("a"));
+                assert_eq!(arr.elements[1], text("b"));
+                assert_eq!(arr.elements[2], text("c"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn split_delim_no_match() {
+        let input = text("hello world");
+        let result = SplitDelim::new(",".to_string()).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 1);
+                assert_eq!(arr.elements[0], text("hello world"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn split_delim_empty_parts() {
+        let input = text("a,,b");
+        let result = SplitDelim::new(",".to_string()).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 3);
+                assert_eq!(arr.elements[0], text("a"));
+                assert_eq!(arr.elements[1], text(""));
+                assert_eq!(arr.elements[2], text("b"));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn split_delim_array_of_strings() {
+        let input = line_array(&["a,b", "c,d,e"]);
+        let result = SplitDelim::new(",".to_string()).apply(input).unwrap();
+        match result {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 2);
+                match &arr.elements[0] {
+                    Value::Array(inner) => {
+                        assert_eq!(inner.len(), 2);
+                        assert_eq!(inner.elements[0], text("a"));
+                        assert_eq!(inner.elements[1], text("b"));
+                    }
+                    _ => panic!("expected inner array"),
+                }
+                match &arr.elements[1] {
+                    Value::Array(inner) => {
+                        assert_eq!(inner.len(), 3);
+                    }
+                    _ => panic!("expected inner array"),
+                }
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn split_delim_preserves_numbers() {
+        let input = Value::Number(42.0);
+        let result = SplitDelim::new(",".to_string()).apply(input).unwrap();
+        assert_eq!(result, Value::Number(42.0));
     }
 
     // Join tests

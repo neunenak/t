@@ -9,7 +9,7 @@ use crate::ast;
 use crate::error::{Error, Result};
 use crate::operators::{
     Ascend, Count, DedupeWithCounts, DeleteEmpty, Descend, Filter, GroupBy, Join, Lowercase,
-    Select, SortAscending, SortDescending, Split, Sum, Trim, Uppercase,
+    Select, SortAscending, SortDescending, Split, SplitDelim, Sum, Trim, Uppercase,
 };
 use crate::value::Value;
 
@@ -128,6 +128,9 @@ pub fn compile(programme: &ast::Programme) -> Result<Vec<Operator>> {
 fn compile_op(op: &ast::Operator) -> Result<Operator> {
     Ok(match op {
         ast::Operator::Split => Operator::Transform(Box::new(Split)),
+        ast::Operator::SplitDelim(delim) => {
+            Operator::Transform(Box::new(SplitDelim::new(delim.clone())))
+        }
         ast::Operator::Join => Operator::Transform(Box::new(Join)),
         ast::Operator::Descend => Operator::Navigate(Box::new(Descend)),
         ast::Operator::Ascend => Operator::Navigate(Box::new(Ascend)),
