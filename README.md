@@ -498,6 +498,9 @@ t 'sg0o:10' access.log
 
 ## Interactive Mode
 
+Interactive mode allows a user to live preview programmes as they're typed.
+Pressing `^J` will toggle between text and JSON modes.
+
 ```bash
 $ t -i access.log
 Loaded 124847 lines
