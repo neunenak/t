@@ -33,6 +33,10 @@ pub enum Operator {
         pattern: String,
         replacement: String,
     },
+    /// `n` - convert to number
+    ToNumber,
+    /// `N<selection>` - convert to number selected elements
+    ToNumberSelected(Selection),
     /// `x` - delete empty elements
     DeleteEmpty,
     /// `d` - dedupe with counts

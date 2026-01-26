@@ -40,6 +40,7 @@ fn operator(input: &mut &str) -> ModalResult<Operator> {
         join_delim_op,
         lowercase_selected_op,
         uppercase_selected_op,
+        to_number_selected_op,
         replace_op,
         filter_op,
         group_by_op,
@@ -51,7 +52,7 @@ fn operator(input: &mut &str) -> ModalResult<Operator> {
 /// Parser for simple single-character operators.
 fn simple_op(input: &mut &str) -> ModalResult<Operator> {
     one_of((
-        's', 'j', '@', '^', 'u', 'l', 't', 'x', 'd', '+', '#', 'o', 'O',
+        's', 'j', '@', '^', 'u', 'l', 't', 'n', 'x', 'd', '+', '#', 'o', 'O',
     ))
     .map(|c| match c {
         's' => Operator::Split,
@@ -61,6 +62,7 @@ fn simple_op(input: &mut &str) -> ModalResult<Operator> {
         'u' => Operator::Uppercase,
         'l' => Operator::Lowercase,
         't' => Operator::Trim,
+        'n' => Operator::ToNumber,
         'x' => Operator::DeleteEmpty,
         'd' => Operator::DedupeWithCounts,
         '+' => Operator::Sum,
@@ -114,6 +116,17 @@ fn uppercase_selected_op(input: &mut &str) -> ModalResult<Operator> {
         )))
         .parse_next(input)?;
     Ok(Operator::UppercaseSelected(sel))
+}
+
+/// Parser for to-number selected operator: `N<selection>`
+fn to_number_selected_op(input: &mut &str) -> ModalResult<Operator> {
+    'N'.parse_next(input)?;
+    let sel = cut_err(selection)
+        .context(StrContext::Expected(StrContextValue::Description(
+            "<selection>",
+        )))
+        .parse_next(input)?;
+    Ok(Operator::ToNumberSelected(sel))
 }
 
 /// Parser for replace operator: `r[<selection>]/<old>/<new>/`
@@ -1060,5 +1073,77 @@ mod tests {
     fn replace_missing_closing_slash_error() {
         let result = parse_programme("r/foo/bar");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn to_number_simple() {
+        let result = parse_programme("n").unwrap();
+        assert_eq!(result.operators, vec![Operator::ToNumber]);
+    }
+
+    #[test]
+    fn to_number_in_sequence() {
+        let result = parse_programme("snj").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::Split, Operator::ToNumber, Operator::Join]
+        );
+    }
+
+    #[test]
+    fn to_number_selected_single_index() {
+        let result = parse_programme("N0").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::ToNumberSelected(Selection {
+                items: vec![SelectItem::Index(0)]
+            })]
+        );
+    }
+
+    #[test]
+    fn to_number_selected_slice() {
+        let result = parse_programme("N:2").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::ToNumberSelected(Selection {
+                items: vec![SelectItem::Slice(Slice {
+                    start: None,
+                    end: Some(2),
+                    step: None,
+                })]
+            })]
+        );
+    }
+
+    #[test]
+    fn to_number_selected_multi() {
+        let result = parse_programme("N0,2").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![Operator::ToNumberSelected(Selection {
+                items: vec![SelectItem::Index(0), SelectItem::Index(2)]
+            })]
+        );
+    }
+
+    #[test]
+    fn to_number_selected_missing_selection_error() {
+        let result = parse_programme("N");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn to_number_selected_followed_by_ops() {
+        let result = parse_programme("N0l").unwrap();
+        assert_eq!(
+            result.operators,
+            vec![
+                Operator::ToNumberSelected(Selection {
+                    items: vec![SelectItem::Index(0)]
+                }),
+                Operator::Lowercase,
+            ]
+        );
     }
 }
