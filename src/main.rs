@@ -55,6 +55,10 @@ struct Cli {
     /// Interactive mode
     #[arg(short = 'i', long = "interactive")]
     interactive: bool,
+
+    /// Print equivalent command line (with -i)
+    #[arg(short = 'p', long = "print")]
+    print_command: bool,
 }
 
 fn main() {
@@ -77,6 +81,17 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Check which files are regular files (before reading, as pipes become invalid after)
+    let regular_files: Vec<_> = files
+        .iter()
+        .filter(|f| {
+            std::fs::metadata(f)
+                .map(|m| m.file_type().is_file())
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect();
+
     let input = if files.is_empty() {
         Array::from_stdin(Level::Line)
     } else {
@@ -93,16 +108,33 @@ fn main() {
     };
 
     if cli.interactive {
-        run_interactive(array);
+        run_interactive(array, &regular_files, cli.print_command);
     } else {
         run_batch(&prog, array, cli.json);
     }
 }
 
-fn run_interactive(input: Array) {
+fn run_interactive(input: Array, files: &[String], print_command: bool) {
     let mut mode = interactive::InteractiveMode::new(input);
     match mode.run() {
         Ok(Some((prog, json))) => {
+            // Print equivalent command line
+            if print_command {
+                eprint!("t");
+                if json {
+                    eprint!(" -j");
+                }
+                eprint!(" '{}'", prog);
+                for file in files {
+                    if file.contains(char::is_whitespace) || file.contains('\'') {
+                        eprint!(" '{}'", file.replace('\'', "'\\''"));
+                    } else {
+                        eprint!(" {}", file);
+                    }
+                }
+                eprintln!();
+            }
+
             // User committed - run full programme on full input
             let input = mode.full_input();
             run_batch(&prog, input, json);

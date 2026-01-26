@@ -8,8 +8,32 @@ impl Transform for Columnate {
     fn apply(&self, value: Value) -> Result<Value> {
         match value {
             Value::Array(arr) => {
-                let rows: Vec<Vec<String>> = arr
-                    .elements
+                // Flatten one level if first element is an array of arrays
+                let is_nested = arr.elements.first().is_some_and(|v| {
+                    if let Value::Array(inner) = v {
+                        inner
+                            .elements
+                            .first()
+                            .is_some_and(|v| matches!(v, Value::Array(_)))
+                    } else {
+                        false
+                    }
+                });
+                let (elements, level) = if is_nested {
+                    let mut flattened: Vec<Value> = Vec::new();
+                    let mut inner_level = arr.level;
+                    for elem in arr.elements {
+                        if let Value::Array(inner) = elem {
+                            inner_level = inner.level;
+                            flattened.extend(inner.elements);
+                        }
+                    }
+                    (flattened, inner_level)
+                } else {
+                    (arr.elements, arr.level)
+                };
+
+                let rows: Vec<Vec<String>> = elements
                     .iter()
                     .map(|row| match row {
                         Value::Array(inner) => {
@@ -20,7 +44,7 @@ impl Transform for Columnate {
                     .collect();
 
                 if rows.is_empty() {
-                    return Ok(Value::Array(arr));
+                    return Ok(Value::Array(Array::from((vec![], level))));
                 }
 
                 let max_cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
@@ -31,7 +55,7 @@ impl Transform for Columnate {
                     }
                 }
 
-                let elements: Vec<Value> = rows
+                let result_elements: Vec<Value> = rows
                     .into_iter()
                     .map(|row| {
                         let last_idx = row.len().saturating_sub(1);
@@ -52,7 +76,7 @@ impl Transform for Columnate {
                     })
                     .collect();
 
-                Ok(Value::Array(Array::from((elements, arr.level))))
+                Ok(Value::Array(Array::from((result_elements, level))))
             }
             other => Ok(other),
         }
@@ -244,5 +268,39 @@ mod tests {
         let input = text("hello");
         let result = Columnate.apply(input).unwrap();
         assert_eq!(result, text("hello"));
+    }
+
+    #[test]
+    fn columnate_flattens_nested_arrays() {
+        // Input: array of arrays of arrays (needs flattening)
+        let input = Value::Array(Array::from((
+            vec![
+                Value::Array(Array::from((
+                    vec![
+                        Value::Array(Array::from((vec![text("a"), text("b")], Level::Word))),
+                        Value::Array(Array::from((vec![text("cc"), text("d")], Level::Word))),
+                    ],
+                    Level::Line,
+                ))),
+                Value::Array(Array::from((
+                    vec![Value::Array(Array::from((
+                        vec![text("eee"), text("f")],
+                        Level::Word,
+                    )))],
+                    Level::Line,
+                ))),
+            ],
+            Level::File,
+        )));
+        let result = Columnate.apply(input).unwrap();
+        let expected = Value::Array(Array::from((
+            vec![
+                row(vec!["a  ", "b"]),
+                row(vec!["cc ", "d"]),
+                row(vec!["eee", "f"]),
+            ],
+            Level::Line,
+        )));
+        assert_eq!(result, expected);
     }
 }
