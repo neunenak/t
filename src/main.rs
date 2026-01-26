@@ -5,6 +5,7 @@ use clap::Parser;
 
 mod ast;
 mod error;
+mod interactive;
 mod interpreter;
 mod operators;
 mod parser;
@@ -49,23 +50,36 @@ struct Cli {
     /// Output as JSON
     #[arg(short = 'j', long = "json")]
     json: bool,
+
+    /// Interactive mode
+    #[arg(short = 'i', long = "interactive")]
+    interactive: bool,
 }
 
 fn main() {
     let cli = Cli::parse();
 
-    let programme = match parser::parse_programme(&cli.prog) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("{}", e);
-            std::process::exit(1);
+    // In interactive mode, prog is treated as the first file argument
+    let (prog, files) = if cli.interactive {
+        let mut all_files = Vec::new();
+        if !cli.prog.is_empty() {
+            all_files.push(cli.prog.clone());
         }
+        all_files.extend(cli.files.iter().cloned());
+        (String::new(), all_files)
+    } else {
+        (cli.prog.clone(), cli.files.clone())
     };
 
-    let input = if cli.files.is_empty() {
+    if cli.interactive && files.is_empty() {
+        eprintln!("Error: interactive mode requires file arguments (cannot read from stdin)");
+        std::process::exit(1);
+    }
+
+    let input = if files.is_empty() {
         Array::from_stdin(Level::Line)
     } else {
-        let paths: Vec<PathBuf> = cli.files.iter().map(PathBuf::from).collect();
+        let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
         Array::from_files(&paths, Level::Line)
     };
 
@@ -73,6 +87,40 @@ fn main() {
         Ok(a) => a,
         Err(e) => {
             eprintln!("Error reading input: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if cli.interactive {
+        run_interactive(array, cli.json);
+    } else {
+        run_batch(&prog, array, cli.json);
+    }
+}
+
+fn run_interactive(input: Array, json: bool) {
+    let mut mode = interactive::InteractiveMode::new(input);
+    match mode.run() {
+        Ok(Some(prog)) => {
+            // User committed - run full programme on full input
+            let input = mode.full_input();
+            run_batch(&prog, input, json);
+        }
+        Ok(None) => {
+            // User cancelled
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_batch(prog: &str, array: Array, json: bool) {
+    let programme = match parser::parse_programme(prog) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}", e);
             std::process::exit(1);
         }
     };
@@ -94,7 +142,7 @@ fn main() {
     let value = ctx.into_value();
     let stdout = io::stdout();
     let mut handle = stdout.lock();
-    if cli.json {
+    if json {
         serde_json::to_writer_pretty(&mut handle, &value).expect("JSON serialization failed");
     } else {
         write!(handle, "{}", value).expect("write failed");
