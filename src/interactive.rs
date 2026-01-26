@@ -39,8 +39,8 @@ const OPERATOR_HELP: &[HelpLine] = &[
     ),
     HelpLine::Row("/<pat>/", "filter keep", "!/<pat>/", "filter remove"),
     HelpLine::Row("x", "delete empty", "d", "dedupe with counts"),
-    HelpLine::Row("D", "dedupe", "o", "sort descending"),
-    HelpLine::Row("O", "sort ascending", "g<sel>", "group by"),
+    HelpLine::Row("D", "dedupe", "g<sel>", "group by"),
+    HelpLine::Row("o", "sort descending", "O", "sort ascending"),
     HelpLine::Row("#", "count", "+", "sum"),
     HelpLine::Row("c", "columnate", "p<sel>", "partition"),
     HelpLine::Row("@", "descend", "^", "ascend"),
@@ -368,39 +368,44 @@ impl InteractiveMode {
             }
         } else {
             // Try to parse and run
-            match self.try_execute() {
-                Ok(value) => {
-                    if self.json_output {
-                        let json = format_json_preview(&value);
-                        for line in json.lines().take(max_lines) {
-                            let truncated = Self::truncate_line(line, term_width);
-                            execute!(stdout, Print("\r\n"))?;
-                            write_highlighted_json_str(stdout, &truncated)?;
-                            lines_below += 1;
-                        }
-                    } else {
-                        let output = format!("{}", value);
-                        for line in output.lines().take(max_lines) {
-                            let truncated = Self::truncate_line(line, term_width);
-                            execute!(stdout, Print("\r\n"), Print(&truncated))?;
-                            lines_below += 1;
-                        }
-                    }
+            let (value, error) = self.try_execute();
+            let error_info = error.as_ref().map(parse_error_info);
+            let output_lines = if error_info.is_some() {
+                max_lines.saturating_sub(1)
+            } else {
+                max_lines
+            };
+
+            // Show error first if present
+            if let Some((offset, message)) = error_info {
+                let caret_pos = 3 + offset; // "t> " is 3 chars
+                let caret_line = format!("{:>width$}", "^", width = caret_pos + 1);
+                let error_line = format!("{} {}", caret_line, message);
+                let truncated = Self::truncate_line(&error_line, term_width);
+                execute!(
+                    stdout,
+                    Print("\r\n"),
+                    SetForegroundColor(Color::Red),
+                    Print(&truncated),
+                    ResetColor
+                )?;
+                lines_below += 1;
+            }
+
+            // Show output
+            if self.json_output {
+                let json = format_json_preview(&value);
+                for line in json.lines().take(output_lines) {
+                    let truncated = Self::truncate_line(line, term_width);
+                    execute!(stdout, Print("\r\n"))?;
+                    write_highlighted_json_str(stdout, &truncated)?;
+                    lines_below += 1;
                 }
-                Err(err) => {
-                    // Show error with caret
-                    let (offset, message) = parse_error_info(&err);
-                    let caret_pos = 3 + offset; // "t> " is 3 chars
-                    let caret_line = format!("{:>width$}", "^", width = caret_pos + 1);
-                    let error_line = format!("{} {}", caret_line, message);
-                    let truncated = Self::truncate_line(&error_line, term_width);
-                    execute!(
-                        stdout,
-                        Print("\r\n"),
-                        SetForegroundColor(Color::Red),
-                        Print(&truncated),
-                        ResetColor
-                    )?;
+            } else {
+                let output = format!("{}", value);
+                for line in output.lines().take(output_lines) {
+                    let truncated = Self::truncate_line(line, term_width);
+                    execute!(stdout, Print("\r\n"), Print(&truncated))?;
                     lines_below += 1;
                 }
             }
@@ -419,18 +424,46 @@ impl InteractiveMode {
         Ok(())
     }
 
-    fn try_execute(&self) -> Result<Value> {
-        let programme =
-            parser::parse_programme(&self.programme).map_err(|e| anyhow::anyhow!("{}", e))?;
+    /// Try to execute the programme. Returns the result of executing as much
+    /// as possible, plus an optional error if something failed.
+    fn try_execute(&self) -> (Value, Option<anyhow::Error>) {
+        // Try parsing the full programme
+        let parse_result = parser::parse_programme(&self.programme);
 
-        let ops = interpreter::compile(&programme)?;
+        let (programme, parse_error) = match parse_result {
+            Ok(prog) => (prog, None),
+            Err(e) => {
+                // Try to find the longest valid prefix
+                let mut valid_prog = None;
+                for i in (0..self.programme.len()).rev() {
+                    if let Ok(prog) = parser::parse_programme(&self.programme[..i])
+                        && !prog.operators.is_empty()
+                    {
+                        valid_prog = Some(prog);
+                        break;
+                    }
+                }
+                (
+                    valid_prog.unwrap_or(crate::ast::Programme { operators: vec![] }),
+                    Some(anyhow::anyhow!("{}", e)),
+                )
+            }
+        };
 
-        // Run on full input - display will be limited later
+        // Compile and run whatever we successfully parsed
+        let ops = match interpreter::compile(&programme) {
+            Ok(ops) => ops,
+            Err(e) => return (Value::Array(self.input.deep_copy()), Some(e.into())),
+        };
+
         let input = self.input.deep_copy();
         let mut ctx = interpreter::Context::new(Value::Array(input));
-        interpreter::run(&ops, &mut ctx)?;
 
-        Ok(ctx.into_value())
+        if let Err(e) = interpreter::run(&ops, &mut ctx) {
+            return (ctx.into_value(), Some(e.into()));
+        }
+
+        (ctx.into_value(), parse_error)
     }
 
     /// Get the full input for final execution after commit.
@@ -469,7 +502,7 @@ fn format_json_compact(value: &Value) -> String {
 
 /// Write syntax-highlighted JSON to a writer.
 pub fn write_json_highlighted<W: io::Write>(w: &mut W, value: &Value) -> io::Result<()> {
-    let json = serde_json::to_string_pretty(value).map_err(|e| io::Error::other(e.to_string()))?;
+    let json = format_json_preview(value);
     write_highlighted_json_str(w, &json)
 }
 

@@ -1,2 +1,2 @@
 #!/bin/bash
-exec cargo run -q -- "$@"
+exec cargo run --release -q -- "$@"

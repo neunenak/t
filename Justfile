@@ -13,7 +13,7 @@ fmt:
 
 # Build the project
 build:
-    cargo build
+    cargo build --release
 
 # Test the project
 test:
