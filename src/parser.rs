@@ -1,6 +1,7 @@
-use winnow::Result;
+use winnow::ModalResult;
 use winnow::ascii::digit1;
-use winnow::combinator::{alt, opt, repeat, separated};
+use winnow::combinator::{alt, cut_err, opt, repeat, separated};
+use winnow::error::{StrContext, StrContextValue};
 use winnow::prelude::*;
 use winnow::token::{one_of, take_till};
 
@@ -10,27 +11,34 @@ use crate::ast::{Operator, Programme, SelectItem, Selection, Slice};
 pub fn parse_programme(input: &str) -> std::result::Result<Programme, String> {
     programme.parse(input).map_err(|e| {
         let offset = e.offset();
-        format!(
-            "parse error: unexpected character\n  {}\n  {}^",
-            input,
-            " ".repeat(offset)
-        )
+        let message = if let Some(ctx) = e.inner().context().next() {
+            match ctx {
+                StrContext::Label(label) => format!("parse error: expected {}", label),
+                StrContext::Expected(StrContextValue::Description(desc)) => {
+                    format!("parse error: expected {}", desc)
+                }
+                _ => "parse error: unexpected character".to_string(),
+            }
+        } else {
+            "parse error: unexpected character".to_string()
+        };
+        format!("{}\n  {}\n  {}^", message, input, " ".repeat(offset))
     })
 }
 
 /// Parser for the full programme.
-fn programme(input: &mut &str) -> Result<Programme> {
+fn programme(input: &mut &str) -> ModalResult<Programme> {
     let operators = repeat(0.., operator).parse_next(input)?;
     Ok(Programme { operators })
 }
 
 /// Parser for a single operator.
-fn operator(input: &mut &str) -> Result<Operator> {
+fn operator(input: &mut &str) -> ModalResult<Operator> {
     alt((simple_op, filter_op, group_by_op, selection_op)).parse_next(input)
 }
 
 /// Parser for simple single-character operators.
-fn simple_op(input: &mut &str) -> Result<Operator> {
+fn simple_op(input: &mut &str) -> ModalResult<Operator> {
     one_of((
         's', 'j', '@', '^', 'u', 'l', 't', 'x', 'd', '+', '#', 'o', 'O',
     ))
@@ -54,11 +62,19 @@ fn simple_op(input: &mut &str) -> Result<Operator> {
 }
 
 /// Parser for filter operator: `/<regex>/` or `!/<regex>/`
-fn filter_op(input: &mut &str) -> Result<Operator> {
+fn filter_op(input: &mut &str) -> ModalResult<Operator> {
     let negate = opt('!').parse_next(input)?.is_some();
     '/'.parse_next(input)?;
-    let pattern: &str = take_till(1.., '/').parse_next(input)?;
-    '/'.parse_next(input)?;
+    let pattern: &str = cut_err(take_till(1.., '/'))
+        .context(StrContext::Expected(StrContextValue::Description(
+            "<pattern>",
+        )))
+        .parse_next(input)?;
+    cut_err('/')
+        .context(StrContext::Expected(StrContextValue::Description(
+            "closing '/'",
+        )))
+        .parse_next(input)?;
     Ok(Operator::Filter {
         pattern: pattern.to_string(),
         negate,
@@ -66,31 +82,35 @@ fn filter_op(input: &mut &str) -> Result<Operator> {
 }
 
 /// Parser for group by operator: `g<selection>`
-fn group_by_op(input: &mut &str) -> Result<Operator> {
+fn group_by_op(input: &mut &str) -> ModalResult<Operator> {
     'g'.parse_next(input)?;
-    let sel = selection.parse_next(input)?;
+    let sel = cut_err(selection)
+        .context(StrContext::Expected(StrContextValue::Description(
+            "<selection>",
+        )))
+        .parse_next(input)?;
     Ok(Operator::GroupBy(sel))
 }
 
 /// Parser for selection operator (indices, slices, multi-select).
-fn selection_op(input: &mut &str) -> Result<Operator> {
+fn selection_op(input: &mut &str) -> ModalResult<Operator> {
     selection.map(Operator::Selection).parse_next(input)
 }
 
 /// Parser for a selection (comma-separated list of select items).
-fn selection(input: &mut &str) -> Result<Selection> {
+fn selection(input: &mut &str) -> ModalResult<Selection> {
     separated(1.., select_item, ',')
         .map(|items| Selection { items })
         .parse_next(input)
 }
 
 /// Parser for a single select item (either a slice or an index).
-fn select_item(input: &mut &str) -> Result<SelectItem> {
+fn select_item(input: &mut &str) -> ModalResult<SelectItem> {
     alt((slice_item, index_item)).parse_next(input)
 }
 
 /// Parser for a slice (must contain at least one ':').
-fn slice_item(input: &mut &str) -> Result<SelectItem> {
+fn slice_item(input: &mut &str) -> ModalResult<SelectItem> {
     let start = opt(index).parse_next(input)?;
     ':'.parse_next(input)?;
     let end = opt(index).parse_next(input)?;
@@ -100,12 +120,12 @@ fn slice_item(input: &mut &str) -> Result<SelectItem> {
 }
 
 /// Parser for a single index (returns as SelectItem).
-fn index_item(input: &mut &str) -> Result<SelectItem> {
+fn index_item(input: &mut &str) -> ModalResult<SelectItem> {
     index.map(SelectItem::Index).parse_next(input)
 }
 
 /// Parser for an integer index (possibly negative).
-fn index(input: &mut &str) -> Result<i64> {
+fn index(input: &mut &str) -> ModalResult<i64> {
     (opt('-'), digit1)
         .map(|(neg, digits): (Option<char>, &str)| {
             let value: i64 = digits.parse().expect("digit1 guarantees valid digits");
@@ -475,6 +495,33 @@ mod tests {
                 }),
                 Operator::SortDescending,
             ]
+        );
+    }
+
+    #[test]
+    fn group_by_missing_selection_error() {
+        let result = parse_programme("sg");
+        assert_eq!(
+            result,
+            Err("parse error: expected <selection>\n  sg\n    ^".to_string())
+        );
+    }
+
+    #[test]
+    fn filter_empty_pattern_error() {
+        let result = parse_programme("//");
+        assert_eq!(
+            result,
+            Err("parse error: expected <pattern>\n  //\n   ^".to_string())
+        );
+    }
+
+    #[test]
+    fn filter_missing_closing_slash_error() {
+        let result = parse_programme("/foo");
+        assert_eq!(
+            result,
+            Err("parse error: expected closing '/'\n  /foo\n      ^".to_string())
         );
     }
 }
