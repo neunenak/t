@@ -85,16 +85,20 @@ pub struct InteractiveMode {
     cursor: usize,
     json_output: bool,
     show_help: bool,
+    /// The row where the prompt line lives (saved at start).
+    prompt_row: u16,
 }
 
 impl InteractiveMode {
     pub fn new(input: Array) -> Self {
+        let prompt_row = cursor::position().map(|(_, row)| row).unwrap_or(0);
         Self {
             input,
             programme: String::new(),
             cursor: 0,
             json_output: false,
             show_help: false,
+            prompt_row,
         }
     }
 
@@ -127,7 +131,11 @@ impl InteractiveMode {
                     }
                     self.draw(&mut stdout)?;
                 }
-                Event::Resize(_, _) => {
+                Event::Resize(_, height) => {
+                    // Clamp prompt_row to be within the new terminal height
+                    if self.prompt_row >= height {
+                        self.prompt_row = height.saturating_sub(1);
+                    }
                     self.draw(&mut stdout)?;
                 }
                 _ => {}
@@ -149,10 +157,10 @@ impl InteractiveMode {
         terminal::size().map(|(w, _)| w as usize).unwrap_or(80)
     }
 
-    fn available_preview_lines(prompt_row: u16) -> usize {
+    fn available_preview_lines(&self) -> usize {
         let (_, term_height) = terminal::size().unwrap_or((80, 24));
         // Lines available below prompt (subtract 1 for the prompt line itself)
-        let lines_below = (term_height as usize).saturating_sub(prompt_row as usize + 1);
+        let lines_below = (term_height as usize).saturating_sub(self.prompt_row as usize + 1);
         lines_below.max(MIN_PREVIEW_LINES)
     }
 
@@ -262,12 +270,11 @@ impl InteractiveMode {
 
     fn draw(&mut self, stdout: &mut io::Stdout) -> Result<()> {
         let term_width = Self::terminal_width();
-        let prompt_row = cursor::position().map(|(_, row)| row).unwrap_or(0);
 
-        // Clear from current position down
+        // Move to saved prompt row and clear from there down
         execute!(
             stdout,
-            cursor::MoveToColumn(0),
+            cursor::MoveTo(0, self.prompt_row),
             terminal::Clear(ClearType::FromCursorDown)
         )?;
 
@@ -286,7 +293,7 @@ impl InteractiveMode {
 
         // Count lines below prompt
         let mut lines_below = 0;
-        let max_lines = Self::available_preview_lines(prompt_row);
+        let max_lines = self.available_preview_lines();
 
         if self.show_help {
             for help_line in OPERATOR_HELP.iter().take(max_lines) {
@@ -398,6 +405,19 @@ impl InteractiveMode {
                     lines_below += 1;
                 }
             }
+        }
+
+        // After printing output, check if the terminal scrolled.
+        // If we printed lines_below lines starting from prompt_row, we expect
+        // the cursor to be at prompt_row + lines_below. If scrolling occurred,
+        // the cursor will be at a lower row (closer to bottom) than expected
+        // relative to prompt_row, meaning prompt_row needs to be adjusted.
+        let (_, current_row) = cursor::position().unwrap_or((0, 0));
+        let expected_row = self.prompt_row + lines_below as u16;
+        if current_row < expected_row {
+            // Terminal scrolled - adjust prompt_row by the scroll amount
+            let scroll_amount = expected_row - current_row;
+            self.prompt_row = self.prompt_row.saturating_sub(scroll_amount);
         }
 
         // Move cursor back to prompt line at the right position
