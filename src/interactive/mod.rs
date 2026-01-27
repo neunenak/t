@@ -54,14 +54,13 @@ struct CachedOutput {
 
 impl InteractiveMode {
     pub fn new(input: Array, json_output: bool) -> Self {
-        let prompt_row = cursor::position().map(|(_, row)| row).unwrap_or(0);
         Self {
             input,
             programme: String::new(),
             cursor: 0,
             json_output,
             show_help: false,
-            prompt_row,
+            prompt_row: 0,
             cached_output: None,
         }
     }
@@ -69,6 +68,9 @@ impl InteractiveMode {
     /// Run interactive mode. Returns (programme, json_mode) if committed, None if cancelled.
     pub fn run(&mut self) -> Result<Option<(String, bool)>> {
         terminal::enable_raw_mode().context("failed to enable raw mode")?;
+        // Query cursor position after enabling raw mode - some terminals require
+        // raw mode for the position query to work correctly
+        self.prompt_row = cursor::position().map(|(_, row)| row).unwrap_or(0);
         let result = self.event_loop();
         terminal::disable_raw_mode().context("failed to disable raw mode")?;
         result

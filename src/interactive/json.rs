@@ -110,7 +110,12 @@ impl JsonLineCtx {
         if highlight {
             write!(&mut self.buf, "{}", SetAttribute(Attribute::Bold)).unwrap();
             self.write_compact(value);
-            write!(&mut self.buf, "{}", SetAttribute(Attribute::NoBold)).unwrap();
+            write!(
+                &mut self.buf,
+                "{}",
+                SetAttribute(Attribute::NormalIntensity)
+            )
+            .unwrap();
         } else if depth > 0 {
             match value {
                 Value::Array(arr) if !arr.elements.is_empty() => {

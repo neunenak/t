@@ -92,9 +92,11 @@ fn format_text_element_highlighted(
                         ));
                     } else {
                         // This is the element to highlight - wrap with ANSI bold
+                        // Use SGR 22 (normal intensity) instead of SGR 0 (full reset)
+                        // to avoid resetting other terminal state
                         result.push_str("\x1b[1m");
                         result.push_str(&format!("{}", elem));
-                        result.push_str("\x1b[0m");
+                        result.push_str("\x1b[22m");
                     }
                 } else {
                     result.push_str(&format!("{}", elem));
