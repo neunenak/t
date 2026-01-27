@@ -4,6 +4,19 @@ use crate::value::{Array, Level, Value};
 
 pub struct Columnate;
 
+struct Cell {
+    text: String,
+    width: usize,
+}
+
+fn value_into_string(v: Value) -> String {
+    match v {
+        Value::Text(s) => s,
+        Value::Number(n) => n.to_string(),
+        Value::Array(arr) => arr.to_string(),
+    }
+}
+
 impl Transform for Columnate {
     fn apply(&self, value: Value) -> Result<Value> {
         match value {
@@ -33,13 +46,24 @@ impl Transform for Columnate {
                     (arr.elements, arr.level)
                 };
 
-                let rows: Vec<Vec<String>> = elements
-                    .iter()
+                // Convert to cells, taking ownership to avoid cloning Text values
+                let rows: Vec<Vec<Cell>> = elements
+                    .into_iter()
                     .map(|row| match row {
-                        Value::Array(inner) => {
-                            inner.elements.iter().map(|v| v.to_string()).collect()
+                        Value::Array(inner) => inner
+                            .elements
+                            .into_iter()
+                            .map(|v| {
+                                let text = value_into_string(v);
+                                let width = text.chars().count();
+                                Cell { text, width }
+                            })
+                            .collect(),
+                        other => {
+                            let text = value_into_string(other);
+                            let width = text.chars().count();
+                            vec![Cell { text, width }]
                         }
-                        other => vec![other.to_string()],
                     })
                     .collect();
 
@@ -51,7 +75,7 @@ impl Transform for Columnate {
                 let mut col_widths = vec![0usize; max_cols];
                 for row in &rows {
                     for (i, cell) in row.iter().enumerate() {
-                        col_widths[i] = col_widths[i].max(cell.chars().count());
+                        col_widths[i] = col_widths[i].max(cell.width);
                     }
                 }
 
@@ -64,11 +88,20 @@ impl Transform for Columnate {
                             .enumerate()
                             .map(|(i, cell)| {
                                 if i == last_idx {
-                                    Value::Text(cell)
+                                    Value::Text(cell.text)
                                 } else {
-                                    let width = col_widths.get(i).copied().unwrap_or(0);
-                                    let padding = width.saturating_sub(cell.chars().count());
-                                    Value::Text(format!("{}{}", cell, " ".repeat(padding)))
+                                    let target_width = col_widths.get(i).copied().unwrap_or(0);
+                                    let padding = target_width.saturating_sub(cell.width);
+                                    if padding == 0 {
+                                        Value::Text(cell.text)
+                                    } else {
+                                        let mut padded = cell.text;
+                                        padded.reserve(padding);
+                                        for _ in 0..padding {
+                                            padded.push(' ');
+                                        }
+                                        Value::Text(padded)
+                                    }
                                 }
                             })
                             .collect();
