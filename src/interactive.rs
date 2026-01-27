@@ -392,9 +392,11 @@ impl InteractiveMode {
 
             // Show output
             if self.json_output {
-                execute!(stdout, Print("\r\n"))?;
-                write_json_preview(stdout, &value, depth, term_width, display_lines)?;
-                lines_below += count_json_preview_lines(&value, display_lines);
+                let json_lines = format_json_preview(&value, depth, display_lines, term_width);
+                for line in &json_lines {
+                    execute!(stdout, Print("\r\n"), Print(line))?;
+                    lines_below += 1;
+                }
             } else {
                 for (i, line) in format_text_with_depth(&value, depth)
                     .iter()
@@ -604,94 +606,182 @@ fn format_text_element_highlighted(value: &Value, remaining_depth: usize) -> Str
     }
 }
 
-/// Count how many lines the JSON preview will use.
-fn count_json_preview_lines(value: &Value, max_lines: usize) -> usize {
-    match value {
-        Value::Array(arr) => (arr.len() + 2).min(max_lines), // +2 for [ and ]
-        _ => 1,
-    }
-}
-
-/// Write JSON preview with depth-based highlighting.
-fn write_json_preview<W: io::Write>(
-    w: &mut W,
+/// Format JSON preview as lines with depth-based highlighting and width truncation.
+fn format_json_preview(
     value: &Value,
     depth: usize,
-    max_width: usize,
     max_lines: usize,
-) -> io::Result<()> {
+    max_width: usize,
+) -> Vec<String> {
+    let mut lines = Vec::new();
     match value {
         Value::Array(arr) => {
-            write_json_punct(w, "[")?;
-            let mut lines_written = 1;
+            let mut ctx = JsonLineCtx::new(max_width);
+            ctx.write_punct("[");
+            lines.push(ctx.finish());
+
             for (i, elem) in arr.elements.iter().enumerate() {
-                if lines_written >= max_lines {
+                if lines.len() >= max_lines {
                     break;
                 }
-                write!(w, "\r\n  ")?;
-                // At depth 0, highlight entire first element
-                // At depth > 0, pass depth down to highlight nested element
+                let mut ctx = JsonLineCtx::new(max_width);
+                ctx.write_str("  ");
                 if i == 0 {
-                    write_json_value(w, elem, depth == 0, depth, max_width - 2)?;
+                    ctx.write_value(elem, depth == 0, depth);
                 } else {
-                    write_json_value(w, elem, false, 0, max_width - 2)?;
+                    ctx.write_value(elem, false, 0);
                 }
                 if i < arr.elements.len() - 1 {
-                    write_json_punct(w, ",")?;
+                    ctx.write_punct(",");
                 }
-                lines_written += 1;
+                lines.push(ctx.finish());
             }
-            if lines_written < max_lines {
-                write!(w, "\r\n")?;
-                write_json_punct(w, "]")?;
+            if lines.len() < max_lines {
+                let mut ctx = JsonLineCtx::new(max_width);
+                ctx.write_punct("]");
+                lines.push(ctx.finish());
             }
         }
         _ => {
-            let highlight = depth == 0;
-            write_json_value(w, value, highlight, 0, max_width)?;
+            let mut ctx = JsonLineCtx::new(max_width);
+            ctx.write_value(value, depth == 0, 0);
+            lines.push(ctx.finish());
         }
     }
-    Ok(())
+    lines
 }
 
-/// Write a JSON value with syntax highlighting. If `highlight` is true, the entire value is bolded.
-/// `depth` indicates how many levels to descend to find the element to highlight (1 = first child).
-fn write_json_value<W: io::Write>(
-    w: &mut W,
-    value: &Value,
-    highlight: bool,
-    depth: usize,
-    _max_width: usize,
-) -> io::Result<()> {
-    if highlight {
-        write!(w, "{}", SetAttribute(Attribute::Bold))?;
-        write_json_compact_highlighted(w, value)?;
-        write!(w, "{}", SetAttribute(Attribute::NoBold))?;
-    } else if depth > 0 {
-        // Need to descend into the structure to highlight a nested element
-        match value {
-            Value::Array(arr) if !arr.elements.is_empty() => {
-                write_json_punct(w, "[")?;
-                for (i, elem) in arr.elements.iter().enumerate() {
-                    if i > 0 {
-                        write_json_punct(w, ",")?;
-                    }
-                    if i == 0 {
-                        // First element: highlight if depth==1, otherwise recurse deeper
-                        write_json_value(w, elem, depth == 1, depth - 1, _max_width)?;
-                    } else {
-                        write_json_compact_highlighted(w, elem)?;
-                    }
-                }
-                write_json_punct(w, "]")?;
-            }
-            _ => write_json_compact_highlighted(w, value)?,
-        }
-    } else {
-        write_json_compact_highlighted(w, value)?;
-    }
-    Ok(())
+/// Context for building a truncated JSON line.
+struct JsonLineCtx {
+    buf: String,
+    visible_len: usize,
+    max_width: usize,
+    truncated: bool,
 }
+
+impl JsonLineCtx {
+    fn new(max_width: usize) -> Self {
+        Self {
+            buf: String::new(),
+            visible_len: 0,
+            max_width,
+            truncated: false,
+        }
+    }
+
+    fn finish(mut self) -> String {
+        if self.truncated {
+            self.buf.push_str("\x1b[0m"); // Reset any active styles
+        }
+        self.buf
+    }
+
+    fn write_str(&mut self, s: &str) {
+        if self.truncated {
+            return;
+        }
+        let remaining = self.max_width.saturating_sub(self.visible_len);
+        if s.len() <= remaining {
+            self.buf.push_str(s);
+            self.visible_len += s.len();
+        } else if remaining > 3 {
+            self.buf.push_str(&s[..remaining - 3]);
+            self.buf.push_str("...");
+            self.visible_len = self.max_width;
+            self.truncated = true;
+        } else {
+            self.buf.push_str("...");
+            self.truncated = true;
+        }
+    }
+
+    fn write_punct(&mut self, s: &str) {
+        use std::fmt::Write;
+        write!(&mut self.buf, "{}", SetForegroundColor(Color::White)).unwrap();
+        self.write_str(s);
+        write!(&mut self.buf, "{}", SetForegroundColor(Color::Reset)).unwrap();
+    }
+
+    fn write_value(&mut self, value: &Value, highlight: bool, depth: usize) {
+        use std::fmt::Write;
+        if self.truncated {
+            return;
+        }
+        if highlight {
+            write!(&mut self.buf, "{}", SetAttribute(Attribute::Bold)).unwrap();
+            self.write_compact(value);
+            write!(&mut self.buf, "{}", SetAttribute(Attribute::NoBold)).unwrap();
+        } else if depth > 0 {
+            match value {
+                Value::Array(arr) if !arr.elements.is_empty() => {
+                    self.write_punct("[");
+                    for (i, elem) in arr.elements.iter().enumerate() {
+                        if self.truncated {
+                            break;
+                        }
+                        if i > 0 {
+                            self.write_punct(",");
+                        }
+                        if i == 0 {
+                            self.write_value(elem, depth == 1, depth - 1);
+                        } else {
+                            self.write_compact(elem);
+                        }
+                    }
+                    self.write_punct("]");
+                }
+                _ => self.write_compact(value),
+            }
+        } else {
+            self.write_compact(value);
+        }
+    }
+
+    fn write_compact(&mut self, value: &Value) {
+        use std::fmt::Write;
+        if self.truncated {
+            return;
+        }
+        match value {
+            Value::Text(t) => {
+                let escaped = serde_json::to_string(t).unwrap_or_else(|_| format!("{:?}", t));
+                write!(&mut self.buf, "{}", SetForegroundColor(Color::Green)).unwrap();
+                self.write_str(&escaped);
+                write!(&mut self.buf, "{}", SetForegroundColor(Color::Reset)).unwrap();
+            }
+            Value::Number(n) => {
+                write!(&mut self.buf, "{}", SetForegroundColor(Color::Cyan)).unwrap();
+                self.write_str(&n.to_string());
+                write!(&mut self.buf, "{}", SetForegroundColor(Color::Reset)).unwrap();
+            }
+            Value::Array(arr) => {
+                self.write_punct("[");
+                for (i, elem) in arr.elements.iter().enumerate() {
+                    if self.truncated {
+                        break;
+                    }
+                    if i > 0 {
+                        self.write_punct(",");
+                    }
+                    self.write_compact(elem);
+                }
+                self.write_punct("]");
+            }
+        }
+    }
+}
+
+/// Write JSON punctuation in white.
+fn write_json_punct<W: io::Write>(w: &mut W, s: &str) -> io::Result<()> {
+    write!(
+        w,
+        "{}{}{}",
+        SetForegroundColor(Color::White),
+        s,
+        SetForegroundColor(Color::Reset)
+    )
+}
+
 /// Write compact JSON with syntax highlighting (but no depth highlight).
 fn write_json_compact_highlighted<W: io::Write>(w: &mut W, value: &Value) -> io::Result<()> {
     match value {
@@ -725,17 +815,6 @@ fn write_json_compact_highlighted<W: io::Write>(w: &mut W, value: &Value) -> io:
             write_json_punct(w, "]")
         }
     }
-}
-
-/// Write JSON punctuation in white.
-fn write_json_punct<W: io::Write>(w: &mut W, s: &str) -> io::Result<()> {
-    write!(
-        w,
-        "{}{}{}",
-        SetForegroundColor(Color::White),
-        s,
-        SetForegroundColor(Color::Reset)
-    )
 }
 
 /// Write syntax-highlighted JSON to a writer (non-interactive).
