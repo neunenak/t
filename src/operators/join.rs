@@ -17,11 +17,21 @@ fn join_array(arr: Array) -> Value {
     let first_is_array = arr
         .elements
         .first()
-        .map(|v| matches!(v, Value::Array(_)))
-        .unwrap_or(false);
+        .is_some_and(|v| matches!(v, Value::Array(_)));
 
     if first_is_array {
-        let mut flattened: Vec<Value> = Vec::new();
+        let total_len: usize = arr
+            .elements
+            .iter()
+            .map(|e| {
+                if let Value::Array(inner) = e {
+                    inner.len()
+                } else {
+                    0
+                }
+            })
+            .sum();
+        let mut flattened: Vec<Value> = Vec::with_capacity(total_len);
         let mut inner_level = arr.level;
 
         for elem in arr.elements {
@@ -46,7 +56,6 @@ fn join_array(arr: Array) -> Value {
                 },
             })
             .collect();
-
         Value::Text(parts.join(" "))
     }
 }
