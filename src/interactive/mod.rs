@@ -236,7 +236,8 @@ impl InteractiveMode {
     }
 
     fn draw(&mut self, stdout: &mut io::Stdout, start: Option<Instant>) -> Result<()> {
-        let term_width = Self::terminal_width();
+        // Use term_width - 1 to prevent auto-wrap when line fills last column
+        let term_width = Self::terminal_width().saturating_sub(1).max(1);
         let max_lines = self.available_preview_lines();
 
         // Get cached or compute formatted output before clearing screen to reduce flicker
@@ -282,8 +283,8 @@ impl InteractiveMode {
                 lines_below += 1;
             }
 
-            // Show pre-formatted output lines
-            for (i, line) in lines.iter().enumerate() {
+            // Show pre-formatted output lines (limit to max_lines in case cache has more)
+            for (i, line) in lines.iter().take(max_lines).enumerate() {
                 execute!(stdout, Print("\r\n"))?;
                 // Highlight first line at depth 0 (only for non-JSON output)
                 if !self.json_output && depth == 0 && i == 0 {
@@ -291,7 +292,7 @@ impl InteractiveMode {
                         stdout,
                         SetAttribute(Attribute::Bold),
                         Print(line),
-                        SetAttribute(Attribute::Reset)
+                        SetAttribute(Attribute::NormalIntensity)
                     )?;
                 } else {
                     execute!(stdout, Print(line))?;
