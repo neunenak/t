@@ -2,6 +2,10 @@
 
 `t` is a concise language for manipulating text, replacing common usage patterns of Unix utilities like grep, sed, cut, awk, sort, and uniq.
 
+
+![Histogram](histogram.svg)
+
+
 ## Usage
 
 ```
