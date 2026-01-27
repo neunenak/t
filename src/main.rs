@@ -118,6 +118,10 @@ fn run_interactive(input: Array, files: &[String], print_command: bool, json: bo
     let mut mode = interactive::InteractiveMode::new(input, json);
     match mode.run() {
         Ok(Some((prog, json))) => {
+            // User committed - run full programme on full input
+            let input = mode.full_input();
+            run_batch(&prog, input, json);
+
             // Print equivalent command line
             if print_command {
                 eprint!("t");
@@ -134,10 +138,6 @@ fn run_interactive(input: Array, files: &[String], print_command: bool, json: bo
                 }
                 eprintln!();
             }
-
-            // User committed - run full programme on full input
-            let input = mode.full_input();
-            run_batch(&prog, input, json);
         }
         Ok(None) => {
             // User cancelled
