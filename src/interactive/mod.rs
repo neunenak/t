@@ -82,7 +82,7 @@ impl InteractiveMode {
     fn event_loop(&mut self) -> Result<Option<(String, bool)>> {
         let mut stdout = io::stdout();
 
-        self.draw(&mut stdout, None)?;
+        self.draw(&mut stdout, None, true)?;
 
         loop {
             match event::read().context("failed to read event")? {
@@ -101,14 +101,16 @@ impl InteractiveMode {
                             return Ok(None);
                         }
                     }
-                    self.draw(&mut stdout, Some(start))?;
+                    self.draw(&mut stdout, Some(start), true)?;
                 }
                 Event::Resize(_, height) => {
-                    // Clamp prompt_row to be within the new terminal height
+                    // Invalidate cache since terminal dimensions changed
+                    self.cached_output = None;
+                    // Clamp prompt_row if terminal shrank below it
                     if self.prompt_row >= height {
                         self.prompt_row = height.saturating_sub(1);
                     }
-                    self.draw(&mut stdout, None)?;
+                    self.draw(&mut stdout, None, false)?;
                 }
                 _ => {}
             }
@@ -262,7 +264,12 @@ impl InteractiveMode {
         }
     }
 
-    fn draw(&mut self, stdout: &mut io::Stdout, start: Option<Instant>) -> Result<()> {
+    fn draw(
+        &mut self,
+        stdout: &mut io::Stdout,
+        start: Option<Instant>,
+        detect_scroll: bool,
+    ) -> Result<()> {
         // Use term_width - 1 to prevent auto-wrap when line fills last column
         let term_width = Self::terminal_width().saturating_sub(1).max(1);
         let max_lines = self.available_preview_lines();
@@ -333,12 +340,15 @@ impl InteractiveMode {
         // the cursor to be at prompt_row + lines_below. If scrolling occurred,
         // the cursor will be at a lower row (closer to bottom) than expected
         // relative to prompt_row, meaning prompt_row needs to be adjusted.
-        let (_, current_row) = cursor::position().unwrap_or((0, 0));
-        let expected_row = self.prompt_row + lines_below as u16;
-        if current_row < expected_row {
-            // Terminal scrolled - adjust prompt_row by the scroll amount
-            let scroll_amount = expected_row - current_row;
-            self.prompt_row = self.prompt_row.saturating_sub(scroll_amount);
+        // Skip this on resize since we just set prompt_row from cursor position.
+        if detect_scroll {
+            let (_, current_row) = cursor::position().unwrap_or((0, 0));
+            let expected_row = self.prompt_row + lines_below as u16;
+            if current_row < expected_row {
+                // Terminal scrolled - adjust prompt_row by the scroll amount
+                let scroll_amount = expected_row - current_row;
+                self.prompt_row = self.prompt_row.saturating_sub(scroll_amount);
+            }
         }
 
         // Move cursor back to prompt line at the right position
