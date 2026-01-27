@@ -90,7 +90,9 @@ impl JsonLineCtx {
             self.visible_len = self.max_width;
             self.truncated = true;
         } else {
-            self.buf.push_str("...");
+            // Only add as many dots as we have space for
+            self.buf.push_str(&"..."[..remaining]);
+            self.visible_len = self.max_width;
             self.truncated = true;
         }
     }
