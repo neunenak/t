@@ -9,11 +9,20 @@ use crate::ast;
 use crate::error::{Error, Result};
 use crate::operators::{
     Ascend, Columnate, Count, DedupeSelectionWithCounts, DedupeWithCounts, DeleteEmpty, Descend,
-    Filter, GroupBy, Join, JoinDelim, Lowercase, LowercaseSelected, NoOp, Partition, Replace,
-    Select, SortAscending, SortDescending, Split, SplitDelim, Sum, ToNumber, ToNumberSelected,
-    Trim, TrimSelected, Uppercase, UppercaseSelected,
+    Filter, GroupBy, Join, JoinDelim, JoinMode, Lowercase, LowercaseSelected, NoOp, Partition,
+    Replace, Select, SortAscending, SortDescending, Split, SplitDelim, SplitMode, Sum, ToNumber,
+    ToNumberSelected, Trim, TrimSelected, Uppercase, UppercaseSelected,
 };
 use crate::value::Value;
+
+/// Configuration for the compiler.
+#[derive(Debug, Clone, Default)]
+pub struct CompileConfig {
+    /// Mode for the `s` (split) operator
+    pub split_mode: SplitMode,
+    /// Mode for the `j` (join) operator
+    pub join_mode: JoinMode,
+}
 
 /// A transform operator converts a value to a new value.
 pub trait Transform {
@@ -136,20 +145,37 @@ pub fn run(ops: &[Operator], ctx: &mut Context) -> Result<()> {
 /// Compile an AST programme into a sequence of operators.
 ///
 /// Returns an error if any operator fails to compile (e.g., invalid regex).
+#[allow(dead_code)]
 pub fn compile(programme: &ast::Programme) -> Result<Vec<Operator>> {
-    programme.operators.iter().map(compile_op).collect()
+    compile_with_config(programme, &CompileConfig::default())
+}
+
+/// Compile an AST programme into a sequence of operators with configuration.
+///
+/// Returns an error if any operator fails to compile (e.g., invalid regex).
+pub fn compile_with_config(
+    programme: &ast::Programme,
+    config: &CompileConfig,
+) -> Result<Vec<Operator>> {
+    programme
+        .operators
+        .iter()
+        .map(|op| compile_op(op, config))
+        .collect()
 }
 
 /// Compile a single AST operator into an Operator.
 ///
 /// Returns an error if a regex pattern is invalid.
-fn compile_op(op: &ast::Operator) -> Result<Operator> {
+fn compile_op(op: &ast::Operator, config: &CompileConfig) -> Result<Operator> {
     Ok(match op {
-        ast::Operator::Split => Operator::Transform(Box::new(Split)),
+        ast::Operator::Split => {
+            Operator::Transform(Box::new(Split::new(config.split_mode.clone())))
+        }
         ast::Operator::SplitDelim(delim) => {
             Operator::Transform(Box::new(SplitDelim::new(delim.clone())))
         }
-        ast::Operator::Join => Operator::Transform(Box::new(Join)),
+        ast::Operator::Join => Operator::Transform(Box::new(Join::new(config.join_mode.clone()))),
         ast::Operator::JoinDelim(delim) => {
             Operator::Transform(Box::new(JoinDelim::new(delim.clone())))
         }

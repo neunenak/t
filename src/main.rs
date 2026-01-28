@@ -11,7 +11,8 @@ mod operators;
 mod parser;
 mod value;
 
-use interpreter::Context;
+use interpreter::{CompileConfig, Context};
+use operators::{JoinMode, SplitMode};
 use value::{Array, Level, Value};
 
 fn about_text() -> String {
@@ -59,6 +60,18 @@ struct Cli {
     /// Print equivalent command line (with -i)
     #[arg(short = 'p', long = "print")]
     print_command: bool,
+
+    /// Input delimiter (what `s` splits on)
+    #[arg(short = 'd')]
+    input_delim: Option<String>,
+
+    /// Output delimiter (what `j` joins with)
+    #[arg(short = 'D')]
+    output_delim: Option<String>,
+
+    /// CSV mode (split/join use CSV parsing)
+    #[arg(short = 'c', long = "csv")]
+    csv: bool,
 }
 
 fn main() {
@@ -80,6 +93,9 @@ fn main() {
         eprintln!("Error: interactive mode requires file arguments (cannot read from stdin)");
         std::process::exit(1);
     }
+
+    // Build compile config from CLI flags
+    let config = build_compile_config(&cli);
 
     // Check which files are regular files (before reading, as pipes become invalid after)
     let regular_files: Vec<_> = files
@@ -108,19 +124,48 @@ fn main() {
     };
 
     if cli.interactive {
-        run_interactive(array, &regular_files, cli.print_command, cli.json);
+        run_interactive(array, &regular_files, cli.print_command, cli.json, &config);
     } else {
-        run_batch(&prog, array, cli.json);
+        run_batch(&prog, array, cli.json, &config);
     }
 }
 
-fn run_interactive(input: Array, files: &[String], print_command: bool, json: bool) {
-    let mut mode = interactive::InteractiveMode::new(input, json);
+fn build_compile_config(cli: &Cli) -> CompileConfig {
+    let split_mode = if cli.csv {
+        SplitMode::Csv
+    } else if let Some(ref delim) = cli.input_delim {
+        SplitMode::Delimiter(delim.clone())
+    } else {
+        SplitMode::Whitespace
+    };
+
+    let join_mode = if cli.csv {
+        JoinMode::Csv
+    } else if let Some(ref delim) = cli.output_delim {
+        JoinMode::Delimiter(delim.clone())
+    } else {
+        JoinMode::Space
+    };
+
+    CompileConfig {
+        split_mode,
+        join_mode,
+    }
+}
+
+fn run_interactive(
+    input: Array,
+    files: &[String],
+    print_command: bool,
+    json: bool,
+    config: &CompileConfig,
+) {
+    let mut mode = interactive::InteractiveMode::new_with_config(input, json, config.clone());
     match mode.run() {
         Ok(Some((prog, json))) => {
             // User committed - run full programme on full input
             let input = mode.full_input();
-            run_batch(&prog, input, json);
+            run_batch(&prog, input, json, config);
 
             // Print equivalent command line
             if print_command {
@@ -149,7 +194,7 @@ fn run_interactive(input: Array, files: &[String], print_command: bool, json: bo
     }
 }
 
-fn run_batch(prog: &str, array: Array, json: bool) {
+fn run_batch(prog: &str, array: Array, json: bool, config: &CompileConfig) {
     let programme = match parser::parse_programme(prog) {
         Ok(p) => p,
         Err(e) => {
@@ -158,7 +203,7 @@ fn run_batch(prog: &str, array: Array, json: bool) {
         }
     };
 
-    let ops = match interpreter::compile(&programme) {
+    let ops = match interpreter::compile_with_config(&programme, config) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("Error: {}", e);

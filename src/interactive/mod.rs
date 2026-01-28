@@ -18,7 +18,7 @@ use crossterm::{
 };
 
 use crate::ast;
-use crate::interpreter;
+use crate::interpreter::{self, CompileConfig};
 use crate::parser;
 use crate::value::{Array, Value};
 
@@ -40,6 +40,8 @@ pub struct InteractiveMode {
     cached_output: Option<CachedOutput>,
     /// Command history for up/down arrow navigation.
     history: history::History,
+    /// Compile configuration for split/join modes.
+    config: CompileConfig,
 }
 
 struct CachedOutput {
@@ -55,7 +57,7 @@ struct CachedOutput {
 }
 
 impl InteractiveMode {
-    pub fn new(input: Array, json_output: bool) -> Self {
+    pub fn new_with_config(input: Array, json_output: bool, config: CompileConfig) -> Self {
         Self {
             input,
             programme: String::new(),
@@ -65,6 +67,7 @@ impl InteractiveMode {
             prompt_row: 0,
             cached_output: None,
             history: history::History::load(),
+            config,
         }
     }
 
@@ -456,7 +459,7 @@ impl InteractiveMode {
         let depth = compute_depth(&programme);
 
         // Compile and run whatever we successfully parsed
-        let ops = match interpreter::compile(&programme) {
+        let ops = match interpreter::compile_with_config(&programme, &self.config) {
             Ok(ops) => ops,
             Err(e) => return (Value::Array(self.input.deep_copy()), depth, Some(e.into())),
         };

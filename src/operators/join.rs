@@ -2,18 +2,46 @@ use crate::error::Result;
 use crate::interpreter::Transform;
 use crate::value::{Array, Value};
 
-pub struct Join;
+/// Join mode determines how `j` joins strings.
+#[derive(Debug, Clone, Default)]
+pub enum JoinMode {
+    /// Join with space (default)
+    #[default]
+    Space,
+    /// Join with a specific delimiter
+    Delimiter(String),
+    /// Join as CSV fields
+    Csv,
+}
+
+pub struct Join {
+    mode: JoinMode,
+}
+
+impl Join {
+    pub fn new(mode: JoinMode) -> Self {
+        Self { mode }
+    }
+}
+
+impl Default for Join {
+    fn default() -> Self {
+        Self {
+            mode: JoinMode::Space,
+        }
+    }
+}
 
 impl Transform for Join {
     fn apply(&self, value: Value) -> Result<Value> {
         match value {
-            Value::Array(arr) => Ok(join_array(arr)),
+            Value::Array(arr) => Ok(join_array(arr, &self.mode)),
             other => Ok(other),
         }
     }
 }
 
-fn join_array(arr: Array) -> Value {
+fn join_array(arr: Array, mode: &JoinMode) -> Value {
     let first_is_array = arr
         .elements
         .first()
@@ -49,14 +77,31 @@ fn join_array(arr: Array) -> Value {
             .map(|v| match v {
                 Value::Text(s) => s,
                 Value::Number(n) => n.to_string(),
-                Value::Array(inner) => match join_array(inner) {
+                Value::Array(inner) => match join_array(inner, mode) {
                     Value::Text(s) => s,
                     Value::Number(n) => n.to_string(),
                     _ => String::new(),
                 },
             })
             .collect();
-        Value::Text(parts.join(" "))
+
+        let joined = match mode {
+            JoinMode::Space => parts.join(" "),
+            JoinMode::Delimiter(delim) => parts.join(delim),
+            JoinMode::Csv => {
+                if parts.is_empty() {
+                    String::new()
+                } else {
+                    let mut writer = csv::Writer::from_writer(vec![]);
+                    writer.write_record(&parts).ok();
+                    writer.flush().ok();
+                    let data = writer.into_inner().unwrap_or_default();
+                    let s = String::from_utf8(data).unwrap_or_default();
+                    s.trim_end_matches('\n').to_string()
+                }
+            }
+        };
+        Value::Text(joined)
     }
 }
 
@@ -116,21 +161,21 @@ mod tests {
     #[test]
     fn join_strings_with_space() {
         let input = word_array(&["hello", "world"]);
-        let result = Join.apply(input).unwrap();
+        let result = Join::default().apply(input).unwrap();
         assert_eq!(result, text("hello world"));
     }
 
     #[test]
     fn join_single_string() {
         let input = word_array(&["hello"]);
-        let result = Join.apply(input).unwrap();
+        let result = Join::default().apply(input).unwrap();
         assert_eq!(result, text("hello"));
     }
 
     #[test]
     fn join_empty_array_of_strings() {
         let input = Value::Array(Array::from((vec![], Level::Word)));
-        let result = Join.apply(input).unwrap();
+        let result = Join::default().apply(input).unwrap();
         assert_eq!(result, text(""));
     }
 
@@ -140,7 +185,7 @@ mod tests {
         let inner2 = word_array(&["foo", "bar"]);
         let outer = Value::Array(Array::from((vec![inner1, inner2], Level::Line)));
 
-        let result = Join.apply(outer).unwrap();
+        let result = Join::default().apply(outer).unwrap();
         match result {
             Value::Array(arr) => {
                 assert_eq!(arr.len(), 4);
@@ -158,7 +203,7 @@ mod tests {
         let inner = word_array(&["a", "b", "c"]);
         let outer = Value::Array(Array::from((vec![inner], Level::Line)));
 
-        let result = Join.apply(outer).unwrap();
+        let result = Join::default().apply(outer).unwrap();
         match result {
             Value::Array(arr) => {
                 assert_eq!(arr.len(), 3);
@@ -175,7 +220,7 @@ mod tests {
         let inner3 = Value::Array(Array::from((vec![], Level::Word)));
         let outer = Value::Array(Array::from((vec![inner1, inner2, inner3], Level::Line)));
 
-        let result = Join.apply(outer).unwrap();
+        let result = Join::default().apply(outer).unwrap();
         match result {
             Value::Array(arr) => {
                 assert_eq!(arr.len(), 1);
@@ -191,7 +236,7 @@ mod tests {
         let inner2 = Value::Array(Array::from((vec![text("b")], Level::Char)));
         let outer = Value::Array(Array::from((vec![inner1, inner2], Level::Word)));
 
-        let result = Join.apply(outer).unwrap();
+        let result = Join::default().apply(outer).unwrap();
         match result {
             Value::Array(arr) => {
                 assert_eq!(arr.level, Level::Char);
@@ -207,15 +252,52 @@ mod tests {
             vec![Value::Number(1.0), Value::Number(2.0), Value::Number(3.0)],
             Level::Word,
         )));
-        let result = Join.apply(input).unwrap();
+        let result = Join::default().apply(input).unwrap();
         assert_eq!(result, text("1 2 3"));
     }
 
     #[test]
     fn join_non_array_is_identity() {
         let input = text("hello");
-        let result = Join.apply(input).unwrap();
+        let result = Join::default().apply(input).unwrap();
         assert_eq!(result, text("hello"));
+    }
+
+    #[test]
+    fn join_with_delimiter() {
+        let input = line_array(&["a", "b", "c"]);
+        let result = Join::new(JoinMode::Delimiter(",".to_string()))
+            .apply(input)
+            .unwrap();
+        assert_eq!(result, text("a,b,c"));
+    }
+
+    #[test]
+    fn join_csv_simple() {
+        let input = line_array(&["a", "b", "c"]);
+        let result = Join::new(JoinMode::Csv).apply(input).unwrap();
+        assert_eq!(result, text("a,b,c"));
+    }
+
+    #[test]
+    fn join_csv_with_comma_in_field() {
+        let input = line_array(&["a", "b,c", "d"]);
+        let result = Join::new(JoinMode::Csv).apply(input).unwrap();
+        assert_eq!(result, text(r#"a,"b,c",d"#));
+    }
+
+    #[test]
+    fn join_csv_with_quotes_in_field() {
+        let input = line_array(&["a", r#"b"c"#, "d"]);
+        let result = Join::new(JoinMode::Csv).apply(input).unwrap();
+        assert_eq!(result, text(r#"a,"b""c",d"#));
+    }
+
+    #[test]
+    fn join_csv_empty() {
+        let input = Value::Array(Array::from((vec![], Level::Line)));
+        let result = Join::new(JoinMode::Csv).apply(input).unwrap();
+        assert_eq!(result, text(""));
     }
 
     #[test]

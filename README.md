@@ -554,6 +554,7 @@ t> s@8do:10<Enter>       # enter commits
 |------|---------|
 | `-d <delim>` | input delimiter (what `s` splits on) |
 | `-D <delim>` | output delimiter (what `j` joins with) |
+| `-c` | CSV mode (split/join handle quoted fields) |
 | `-f` | file mode |
 | `-e <prog>` | explain |
 | `-p <prog>` | parse tree |
