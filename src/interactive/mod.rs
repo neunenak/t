@@ -23,7 +23,7 @@ use crate::parser;
 use crate::value::{Array, Value};
 
 pub use help::help_text;
-pub use json::write_json_highlighted;
+pub use json::{write_json_debug, write_json_highlighted};
 
 /// Batch sizes for adaptive preview execution.
 const PREVIEW_BATCH_SIZES: &[usize] = &[100, 500, 2000, usize::MAX];

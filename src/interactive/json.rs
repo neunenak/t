@@ -4,7 +4,7 @@ use std::io;
 
 use crossterm::style::{Attribute, Color, SetAttribute, SetForegroundColor};
 
-use crate::value::Value;
+use crate::value::{Level, Value};
 
 /// Format JSON preview as lines with depth-based highlighting and width truncation.
 pub fn format_json_preview(
@@ -262,4 +262,83 @@ fn write_json_value_noninteractive<W: io::Write>(
             serde_json::to_string(value).unwrap_or_else(|e| format!("\"JSON error: {}\"", e));
         write!(w, "{}", json)
     }
+}
+
+fn level_name(level: Level) -> &'static str {
+    match level {
+        Level::File => "file",
+        Level::Line => "line",
+        Level::Word => "word",
+        Level::Char => "char",
+    }
+}
+
+/// Write debug JSON output showing semantic level before each array.
+pub fn write_json_debug<W: io::Write>(w: &mut W, value: &Value, use_color: bool) -> io::Result<()> {
+    write_json_debug_inner(w, value, use_color, 0)
+}
+
+fn write_json_debug_inner<W: io::Write>(
+    w: &mut W,
+    value: &Value,
+    use_color: bool,
+    indent: usize,
+) -> io::Result<()> {
+    let indent_str = "  ".repeat(indent);
+    match value {
+        Value::Array(arr) => {
+            if use_color {
+                write!(
+                    w,
+                    "{}/*{}*/ [",
+                    SetForegroundColor(Color::Yellow),
+                    level_name(arr.level)
+                )?;
+                write!(w, "{}", SetForegroundColor(Color::Reset))?;
+            } else {
+                write!(w, "/*{}*/ [", level_name(arr.level))?;
+            }
+            for (i, elem) in arr.elements.iter().enumerate() {
+                writeln!(w)?;
+                write!(w, "{}  ", indent_str)?;
+                write_json_debug_inner(w, elem, use_color, indent + 1)?;
+                if i < arr.elements.len() - 1 {
+                    write!(w, ",")?;
+                }
+            }
+            if !arr.elements.is_empty() {
+                writeln!(w)?;
+                write!(w, "{}", indent_str)?;
+            }
+            write!(w, "]")?;
+        }
+        Value::Text(s) => {
+            let escaped = serde_json::to_string(s).unwrap_or_else(|_| format!("{:?}", s));
+            if use_color {
+                write!(
+                    w,
+                    "{}{}{}",
+                    SetForegroundColor(Color::Green),
+                    escaped,
+                    SetForegroundColor(Color::Reset)
+                )?;
+            } else {
+                write!(w, "{}", escaped)?;
+            }
+        }
+        Value::Number(n) => {
+            if use_color {
+                write!(
+                    w,
+                    "{}{}{}",
+                    SetForegroundColor(Color::Cyan),
+                    n,
+                    SetForegroundColor(Color::Reset)
+                )?;
+            } else {
+                write!(w, "{}", n)?;
+            }
+        }
+    }
+    Ok(())
 }

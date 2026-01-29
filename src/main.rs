@@ -72,6 +72,10 @@ struct Cli {
     /// CSV mode (split/join use CSV parsing)
     #[arg(short = 'c', long = "csv")]
     csv: bool,
+
+    /// Debug mode (show semantic level before arrays)
+    #[arg(long = "debug")]
+    debug: bool,
 }
 
 fn main() {
@@ -126,7 +130,7 @@ fn main() {
     if cli.interactive {
         run_interactive(array, &regular_files, cli.print_command, cli.json, &config);
     } else {
-        run_batch(&prog, array, cli.json, &config);
+        run_batch(&prog, array, cli.json, cli.debug, &config);
     }
 }
 
@@ -165,7 +169,7 @@ fn run_interactive(
         Ok(Some((prog, json))) => {
             // User committed - run full programme on full input
             let input = mode.full_input();
-            run_batch(&prog, input, json, config);
+            run_batch(&prog, input, json, false, config);
 
             // Print equivalent command line
             if print_command {
@@ -194,7 +198,7 @@ fn run_interactive(
     }
 }
 
-fn run_batch(prog: &str, array: Array, json: bool, config: &CompileConfig) {
+fn run_batch(prog: &str, array: Array, json: bool, debug: bool, config: &CompileConfig) {
     let programme = match parser::parse_programme(prog) {
         Ok(p) => p,
         Err(e) => {
@@ -221,7 +225,10 @@ fn run_batch(prog: &str, array: Array, json: bool, config: &CompileConfig) {
     let stdout = io::stdout();
     let use_color = stdout.is_terminal();
     let mut handle = stdout.lock();
-    let result = if json {
+    let result = if debug {
+        interactive::write_json_debug(&mut handle, &value, use_color)
+            .and_then(|()| writeln!(handle))
+    } else if json {
         interactive::write_json_highlighted(&mut handle, &value, use_color)
             .and_then(|()| writeln!(handle))
     } else {
