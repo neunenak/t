@@ -290,14 +290,15 @@ fn write_json_debug_inner<W: io::Write>(
             if use_color {
                 write!(
                     w,
-                    "{}/*{}*/ [",
+                    "{}/*{}*/{}",
                     SetForegroundColor(Color::Yellow),
-                    level_name(arr.level)
+                    level_name(arr.level),
+                    SetForegroundColor(Color::Reset)
                 )?;
-                write!(w, "{}", SetForegroundColor(Color::Reset))?;
             } else {
-                write!(w, "/*{}*/ [", level_name(arr.level))?;
+                write!(w, "/*{}*/", level_name(arr.level))?;
             }
+            write!(w, " [")?;
             for (i, elem) in arr.elements.iter().enumerate() {
                 writeln!(w)?;
                 write!(w, "{}  ", indent_str)?;
