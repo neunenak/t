@@ -104,6 +104,27 @@ impl JsonLineCtx {
         write!(&mut self.buf, "{}", SetForegroundColor(Color::Reset)).unwrap();
     }
 
+    fn write_level_comment(&mut self, level: &str) {
+        use std::fmt::Write;
+        write!(&mut self.buf, "{}", SetForegroundColor(Color::Yellow)).unwrap();
+        self.write_str(&format!("/*{}*/", level));
+        write!(&mut self.buf, "{}", SetForegroundColor(Color::Reset)).unwrap();
+    }
+
+    fn write_string(&mut self, s: &str) {
+        use std::fmt::Write;
+        write!(&mut self.buf, "{}", SetForegroundColor(Color::Green)).unwrap();
+        self.write_str(s);
+        write!(&mut self.buf, "{}", SetForegroundColor(Color::Reset)).unwrap();
+    }
+
+    fn write_number(&mut self, s: &str) {
+        use std::fmt::Write;
+        write!(&mut self.buf, "{}", SetForegroundColor(Color::Cyan)).unwrap();
+        self.write_str(s);
+        write!(&mut self.buf, "{}", SetForegroundColor(Color::Reset)).unwrap();
+    }
+
     fn write_value(&mut self, value: &Value, highlight: bool, depth: usize) {
         use std::fmt::Write;
         if self.truncated {
@@ -174,6 +195,139 @@ impl JsonLineCtx {
                 }
                 self.write_punct("]");
             }
+        }
+    }
+}
+
+/// Format debug JSON preview as lines with semantic level annotations.
+pub fn format_json_debug_preview(value: &Value, max_lines: usize, max_width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    format_debug_value(&mut lines, value, 0, max_lines, max_width);
+    lines
+}
+
+fn format_debug_value(
+    lines: &mut Vec<String>,
+    value: &Value,
+    indent: usize,
+    max_lines: usize,
+    max_width: usize,
+) {
+    if lines.len() >= max_lines {
+        return;
+    }
+    let indent_str = "  ".repeat(indent);
+    match value {
+        Value::Array(arr) => {
+            let level_str = level_name(arr.level);
+            let mut ctx = JsonLineCtx::new(max_width);
+            ctx.write_str(&indent_str);
+            ctx.write_level_comment(level_str);
+            ctx.write_str(" ");
+            ctx.write_punct("[");
+            lines.push(ctx.finish());
+
+            for (i, elem) in arr.elements.iter().enumerate() {
+                if lines.len() >= max_lines {
+                    break;
+                }
+                format_debug_element(
+                    lines,
+                    elem,
+                    indent + 1,
+                    i < arr.elements.len() - 1,
+                    max_lines,
+                    max_width,
+                );
+            }
+
+            if lines.len() < max_lines {
+                let mut ctx = JsonLineCtx::new(max_width);
+                ctx.write_str(&indent_str);
+                ctx.write_punct("]");
+                lines.push(ctx.finish());
+            }
+        }
+        Value::Text(t) => {
+            let mut ctx = JsonLineCtx::new(max_width);
+            ctx.write_str(&indent_str);
+            let escaped = serde_json::to_string(t).unwrap_or_else(|_| format!("{:?}", t));
+            ctx.write_string(&escaped);
+            lines.push(ctx.finish());
+        }
+        Value::Number(n) => {
+            let mut ctx = JsonLineCtx::new(max_width);
+            ctx.write_str(&indent_str);
+            ctx.write_number(&n.to_string());
+            lines.push(ctx.finish());
+        }
+    }
+}
+
+fn format_debug_element(
+    lines: &mut Vec<String>,
+    value: &Value,
+    indent: usize,
+    has_comma: bool,
+    max_lines: usize,
+    max_width: usize,
+) {
+    if lines.len() >= max_lines {
+        return;
+    }
+    let indent_str = "  ".repeat(indent);
+    match value {
+        Value::Array(arr) => {
+            let level_str = level_name(arr.level);
+            let mut ctx = JsonLineCtx::new(max_width);
+            ctx.write_str(&indent_str);
+            ctx.write_level_comment(level_str);
+            ctx.write_str(" ");
+            ctx.write_punct("[");
+            lines.push(ctx.finish());
+
+            for (i, elem) in arr.elements.iter().enumerate() {
+                if lines.len() >= max_lines {
+                    break;
+                }
+                format_debug_element(
+                    lines,
+                    elem,
+                    indent + 1,
+                    i < arr.elements.len() - 1,
+                    max_lines,
+                    max_width,
+                );
+            }
+
+            if lines.len() < max_lines {
+                let mut ctx = JsonLineCtx::new(max_width);
+                ctx.write_str(&indent_str);
+                ctx.write_punct("]");
+                if has_comma {
+                    ctx.write_punct(",");
+                }
+                lines.push(ctx.finish());
+            }
+        }
+        Value::Text(t) => {
+            let mut ctx = JsonLineCtx::new(max_width);
+            ctx.write_str(&indent_str);
+            let escaped = serde_json::to_string(t).unwrap_or_else(|_| format!("{:?}", t));
+            ctx.write_string(&escaped);
+            if has_comma {
+                ctx.write_punct(",");
+            }
+            lines.push(ctx.finish());
+        }
+        Value::Number(n) => {
+            let mut ctx = JsonLineCtx::new(max_width);
+            ctx.write_str(&indent_str);
+            ctx.write_number(&n.to_string());
+            if has_comma {
+                ctx.write_punct(",");
+            }
+            lines.push(ctx.finish());
         }
     }
 }

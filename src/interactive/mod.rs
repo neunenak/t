@@ -33,6 +33,7 @@ pub struct InteractiveMode {
     programme: String,
     cursor: usize,
     json_output: bool,
+    debug_output: bool,
     show_help: bool,
     /// The row where the prompt line lives (saved at start).
     prompt_row: u16,
@@ -47,6 +48,7 @@ pub struct InteractiveMode {
 struct CachedOutput {
     programme: String,
     json_output: bool,
+    debug_output: bool,
     needed_lines: usize,
     /// Formatted output lines ready for display
     lines: Vec<String>,
@@ -57,12 +59,18 @@ struct CachedOutput {
 }
 
 impl InteractiveMode {
-    pub fn new_with_config(input: Array, json_output: bool, config: CompileConfig) -> Self {
+    pub fn new_with_config(
+        input: Array,
+        json_output: bool,
+        debug_output: bool,
+        config: CompileConfig,
+    ) -> Self {
         Self {
             input,
             programme: String::new(),
             cursor: 0,
             json_output,
+            debug_output,
             show_help: false,
             prompt_row: 0,
             cached_output: None,
@@ -71,8 +79,8 @@ impl InteractiveMode {
         }
     }
 
-    /// Run interactive mode. Returns (programme, json_mode) if committed, None if cancelled.
-    pub fn run(&mut self) -> Result<Option<(String, bool)>> {
+    /// Run interactive mode. Returns (programme, json_mode, debug_mode) if committed, None if cancelled.
+    pub fn run(&mut self) -> Result<Option<(String, bool, bool)>> {
         terminal::enable_raw_mode().context("failed to enable raw mode")?;
         // Query cursor position after enabling raw mode - some terminals require
         // raw mode for the position query to work correctly
@@ -82,7 +90,7 @@ impl InteractiveMode {
         result
     }
 
-    fn event_loop(&mut self) -> Result<Option<(String, bool)>> {
+    fn event_loop(&mut self) -> Result<Option<(String, bool, bool)>> {
         let mut stdout = io::stdout();
 
         self.draw(&mut stdout, None, true)?;
@@ -97,7 +105,11 @@ impl InteractiveMode {
                             self.history.add(&self.programme);
                             self.history.save();
                             self.clear_output(&mut stdout)?;
-                            return Ok(Some((self.programme.clone(), self.json_output)));
+                            return Ok(Some((
+                                self.programme.clone(),
+                                self.json_output,
+                                self.debug_output,
+                            )));
                         }
                         KeyAction::Cancel => {
                             self.clear_output(&mut stdout)?;
@@ -392,6 +404,7 @@ impl InteractiveMode {
         if let Some(ref cached) = self.cached_output
             && cached.programme == self.programme
             && cached.json_output == self.json_output
+            && cached.debug_output == self.debug_output
             && cached.needed_lines >= max_lines
         {
             return (
@@ -412,7 +425,9 @@ impl InteractiveMode {
         };
 
         // Format output lines
-        let lines: Vec<String> = if self.json_output {
+        let lines: Vec<String> = if self.debug_output {
+            json::format_json_debug_preview(&value, display_lines, term_width)
+        } else if self.json_output {
             json::format_json_preview(&value, depth, display_lines, term_width)
         } else {
             text::format_text_with_depth(&value, depth, display_lines, term_width)
@@ -422,6 +437,7 @@ impl InteractiveMode {
         self.cached_output = Some(CachedOutput {
             programme: self.programme.clone(),
             json_output: self.json_output,
+            debug_output: self.debug_output,
             needed_lines: max_lines,
             lines: lines.clone(),
             depth,

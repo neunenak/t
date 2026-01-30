@@ -128,7 +128,14 @@ fn main() {
     };
 
     if cli.interactive {
-        run_interactive(array, &regular_files, cli.print_command, cli.json, &config);
+        run_interactive(
+            array,
+            &regular_files,
+            cli.print_command,
+            cli.json,
+            cli.debug,
+            &config,
+        );
     } else {
         run_batch(&prog, array, cli.json, cli.debug, &config);
     }
@@ -162,14 +169,16 @@ fn run_interactive(
     files: &[String],
     print_command: bool,
     json: bool,
+    debug: bool,
     config: &CompileConfig,
 ) {
-    let mut mode = interactive::InteractiveMode::new_with_config(input, json, config.clone());
+    let mut mode =
+        interactive::InteractiveMode::new_with_config(input, json, debug, config.clone());
     match mode.run() {
-        Ok(Some((prog, json))) => {
+        Ok(Some((prog, json, debug))) => {
             // User committed - run full programme on full input
             let input = mode.full_input();
-            run_batch(&prog, input, json, false, config);
+            run_batch(&prog, input, json, debug, config);
 
             // Print equivalent command line
             if print_command {
