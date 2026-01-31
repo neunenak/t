@@ -48,10 +48,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # ratchet:actions/checkout@v6
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # ratchet:actions/download-artifact@v7
         with:
           merge-multiple: true
-      - uses: ncipollo/release-action@b7eabc95ff50cbeeedec83973935c8f306dfcd0b # ratchet:ncipollo/release-action@v1
-        with:
-          artifacts: "t-*.bz2"
-          generateReleaseNotes: true
+      - run: gh release create ${{ github.ref_name }} t-*.bz2 --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
