@@ -21,8 +21,8 @@ jobs:
           - os: macos-latest
             target-suffix: apple-darwin
     steps:
-      - uses: actions/checkout@v4
-      - uses: cashapp/activate-hermit@v1
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # ratchet:actions/checkout@v6
+      - uses: cashapp/activate-hermit@e49f5cb4dd64ff0b0b659d1d8df499595451155a # ratchet:cashapp/activate-hermit@v1
         with:
           cache: true
       - id: build
@@ -35,7 +35,7 @@ jobs:
           mv "target/${TARGET}"/release/t "${TARGET_PATH}"
           bzip2 -f9 "${TARGET_PATH}"
           echo "TARGET_PATH=${TARGET_PATH}.bz2" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # ratchet:actions/upload-artifact@v6
         with:
           name: t-${{ matrix.arch }}-${{ matrix.target-suffix }}
           path: ${{ steps.build.outputs.TARGET_PATH }}
@@ -48,9 +48,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # ratchet:actions/download-artifact@v7
         with:
           merge-multiple: true
-      - uses: ncipollo/release-action@v4
+      - uses: ncipollo/release-action@b7eabc95ff50cbeeedec83973935c8f306dfcd0b # ratchet:ncipollo/release-action@v1
         with:
           artifacts: "t-*.bz2"
