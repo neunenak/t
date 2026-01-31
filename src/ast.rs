@@ -43,6 +43,8 @@ pub enum Operator {
     TrimSelected(Selection),
     /// `x` - delete empty elements
     DeleteEmpty,
+    /// `f` - flatten nested arrays by one level
+    Flatten,
     /// `d` - dedupe with counts
     DedupeWithCounts,
     /// `D<selection>` - dedupe by selection with counts

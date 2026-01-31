@@ -55,7 +55,7 @@ fn operator(input: &mut &str) -> ModalResult<Operator> {
 /// Parser for simple single-character operators.
 fn simple_op(input: &mut &str) -> ModalResult<Operator> {
     one_of((
-        's', 'j', '@', '^', 'u', 'l', 't', 'n', 'x', 'd', '+', '#', 'c', 'o', 'O', ';',
+        's', 'j', '@', '^', 'u', 'l', 't', 'n', 'x', 'f', 'd', '+', '#', 'c', 'o', 'O', ';',
     ))
     .map(|c| match c {
         's' => Operator::Split,
@@ -67,6 +67,7 @@ fn simple_op(input: &mut &str) -> ModalResult<Operator> {
         't' => Operator::Trim,
         'n' => Operator::ToNumber,
         'x' => Operator::DeleteEmpty,
+        'f' => Operator::Flatten,
         'd' => Operator::DedupeWithCounts,
         '+' => Operator::Sum,
         '#' => Operator::Count,

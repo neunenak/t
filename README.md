@@ -100,7 +100,7 @@ Arrays have a semantic "level" that determines how `s` splits and `j` joins:
 
 ### Quick Reference
 
-#### Split/Join
+#### Structural
 
 | Operator | Meaning |
 |----------|---------|
@@ -108,6 +108,7 @@ Arrays have a semantic "level" that determines how `s` splits and `j` joins:
 | `S<char>` or `S"<delim>"` | split on delimiter |
 | `j` | join natural (inverse of `s`) |
 | `J<char>` or `J"<delim>"` | join with delimiter |
+| `f` | flatten one level |
 
 #### Transform
 
@@ -216,6 +217,15 @@ Joins array elements with a custom delimiter:
 
 ```
 ["a", "b", "c"]  →  "a,b,c"   (with J,)
+```
+
+#### `f` - Flatten
+
+Flattens nested arrays by one level. Non-array elements are kept as-is.
+
+```
+[["a", "b"], ["c"]]  →  ["a", "b", "c"]
+[["a", ["b", "c"]], ["d"]]  →  ["a", ["b", "c"], "d"]   (only one level)
 ```
 
 #### `l` - Lowercase
