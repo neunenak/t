@@ -155,7 +155,7 @@ fn build_compile_config(cli: &Cli) -> CompileConfig {
     } else if let Some(ref delim) = cli.output_delim {
         JoinMode::Delimiter(delim.clone())
     } else {
-        JoinMode::Space
+        JoinMode::Semantic
     };
 
     CompileConfig {

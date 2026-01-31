@@ -54,6 +54,8 @@ curl -fsSL https://raw.githubusercontent.com/alecthomas/t/master/install.sh | IN
 
 By default, input is a flat stream of lines, with each input file's lines concatenated together: `[line, line, ...]`. The `-f` flag can be used to switch to file mode: `[file, file, ...]`.
 
+Most operators apply to each element of the current array individually. For example, `l` (lowercase) on `["Hello", "World"]` produces `["hello", "world"]`—each element is lowercased independently.
+
 Operators come in three kinds:
 
 - **Transform** (map): apply to each element. `l` on `["Hello", "World"]` → `["hello", "world"]`
@@ -76,11 +78,13 @@ There are three types:
 | string | text |
 | number | numeric value (converted from string via `n`) |
 
-Input is always an array of strings (lines). Operators like `s` create nested arrays, `j` flattens them. Numbers only exist after explicit conversion with `n`, and are used by numeric operators like `+`.
+Input is always an array of strings (lines). Operators like `s` create nested arrays, `j` joins them back. Numbers only exist after explicit conversion with `n`, and are used by numeric operators like `+`.
 
 ## Split/Join Semantics
 
-Arrays have a semantic "level" that determines how `s` splits their text elements:
+`s` and `j` are inverse operations—`sj` always returns the original value.
+
+Arrays have a semantic "level" that determines how `s` splits and `j` joins:
 
 | Array Level | `s` splits text into | `j` joins with |
 |-------------|----------------------|----------------|
@@ -90,9 +94,7 @@ Arrays have a semantic "level" that determines how `s` splits their text element
 
 `s` operates only on the direct text elements of an array—it does not recurse into nested arrays. To split at deeper levels, use `@` to descend first.
 
-`j` also flattens arrays: `[[a, b], [c]]` → `[a, b, c]`
-
-Bare text (e.g., after single-element selection) is treated as a word and splits into characters.
+`j` joins the elements of each nested array back into text, reversing the effect of `s`. It does not flatten—use `@` to join at deeper levels.
 
 ## Operators
 
@@ -104,7 +106,7 @@ Bare text (e.g., after single-element selection) is treated as a word and splits
 |----------|---------|
 | `s` | split natural |
 | `S<char>` or `S"<delim>"` | split on delimiter |
-| `j` | join/flatten natural |
+| `j` | join natural (inverse of `s`) |
 | `J<char>` or `J"<delim>"` | join with delimiter |
 
 #### Transform
@@ -193,19 +195,16 @@ Splits on a custom delimiter. Use a single character directly, or quotes for mul
 "a::b::c"  →  ["a", "b", "c"]   (with S"::")
 ```
 
-#### `j` - Join/Flatten
+#### `j` - Join
 
-Behavior depends on the array contents:
-
-- **Array of arrays**: flattens one level into a single array
-- **Array of strings/numbers**: joins with space into a single string
+The inverse of `s`—joins nested arrays back into text using the appropriate delimiter for the array level. `sj` always returns the original value.
 
 ```
-# Flatten arrays
-[["a", "b"], ["c", "d"]]  →  ["a", "b", "c", "d"]
+# Join words back into lines (after s)
+[["hello", "world"], ["foo", "bar"]]  →  ["hello world", "foo bar"]
 
-# Join strings
-["hello", "world"]  →  "hello world"
+# Join chars back into words (after s@s)
+[["h","e","l","l","o"], ["w","o","r","l","d"]]  →  ["hello", "world"]
 ```
 
 #### `J<delim>` - Join with Delimiter
