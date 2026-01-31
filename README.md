@@ -23,7 +23,7 @@ tr -s '[:space:]' '\n' < file | tr A-Z a-z | sort | uniq -c | sort -rn | head -2
 The equivalent in `t` would be:
 
 ```bash
-t 'sjld:20' file
+t 'sfld:20' file
 ```
 
 Going through the programme step by step gives us:
@@ -32,7 +32,7 @@ Going through the programme step by step gives us:
 |----|-------|-------------|
 | | `[line, line, ...]` | lines of input |
 | `s` | `[[word, word], [word], ...]` | split each line into words |
-| `j` | `[word, word, word, ...]` | flatten into single list |
+| `f` | `[word, word, word, ...]` | flatten into single list |
 | `l` | `[word, word, word, ...]` | lowercase each word |
 | `d` | `[[5, "the"], [3, "cat"], ...]` | dedupe with counts |
 | `:20` | `[[5, "the"], [3, "cat"], ...]` | take first 20 |
@@ -52,7 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/alecthomas/t/master/install.sh | IN
 
 ## Data Model
 
-By default, input is a flat stream of lines, with each input file's lines concatenated together: `[line, line, ...]`. The `-f` flag can be used to switch to file mode: `[file, file, ...]`.
+By default, input is a flat stream of lines, with each input file's lines concatenated together: `[line, line, ...]`.
 
 Most operators apply to each element of the current array individually. For example, `l` (lowercase) on `["Hello", "World"]` produces `["hello", "world"]`—each element is lowercased independently.
 
@@ -141,7 +141,7 @@ Arrays have a semantic "level" that determines how `s` splits and `j` joins:
 | `O` | sort ascending |
 | `g<selection>` | group by |
 | `d` | dedupe with counts |
-| `D` | dedupe |
+| `D<selection>` | dedupe by selected field |
 | `#` | count |
 | `+` | sum |
 | `c` | columnate |
@@ -373,12 +373,13 @@ Removes duplicates and counts occurrences. Returns `[[count, value], ...]` sorte
 ["a", "b", "a", "a", "b"]  →  [[3, "a"], [2, "b"]]
 ```
 
-#### `D` - Dedupe
+#### `D<selection>` - Dedupe by Field
 
-Removes duplicates, keeping first occurrence. Returns unique values only.
+Removes duplicates based on the value at the specified selection, counting occurrences. Returns `[[count, element], ...]` sorted by count descending.
 
 ```
-["a", "b", "a", "a", "b"]  →  ["a", "b"]
+# Dedupe by first element
+[["a", 1], ["b", 2], ["a", 3]]  →  [[2, ["a", 1]], [1, ["b", 2]]]   (with D0)
 ```
 
 #### `#` - Count
@@ -455,8 +456,8 @@ Multiple `@` descends multiple levels:
 Ascends one level, undoing a previous `@`. Returns focus to the parent array.
 
 ```
-# Split, descend, select first word, ascend, join
-"hello world\nfoo bar"  →  ["hello", "foo"]  →  "hello foo"   (with s@0^j)
+# Split, descend, select first word, ascend
+"hello world\nfoo bar"  →  ["hello", "foo"]   (with s@0)
 ```
 
 #### `;` - Separator
@@ -465,10 +466,10 @@ A no-op operator that does nothing. Useful for visually separating groups of ope
 
 ```
 # Without separator
-s@0do:10
+s@0^do:10
 
 # With separator for readability
-s@0;d;o;:10
+s@0^;d;o;:10
 ```
 
 ## Selection
@@ -556,15 +557,13 @@ $ t -i access.log
 Loaded 124847 lines
 t> s                     # live preview as you type
 [[192.168.1.1, -, -, ...], [10.0.0.5, -, -, ...], ...]
-t> s@
-[[192.168.1.1, -, -, ...], [10.0.0.5, -, -, ...], ...]
 t> s@8
 ["200", "404", "200", "500", ...]
-t> s@8d
+t> s@8^d
 [[98423, "200"], [1042, "404"], [89, "500"], ...]
-t> s@8do
+t> s@8^do
 [[98423, "200"], [1042, "404"], [89, "500"], ...]
-t> s@8do:10<Enter>       # enter commits
+t> s@8^do:10<Enter>      # enter commits
 ```
 
 ## CLI Flags
@@ -574,7 +573,6 @@ t> s@8do:10<Enter>       # enter commits
 | `-d <delim>` | input delimiter (what `s` splits on) |
 | `-D <delim>` | output delimiter (what `j` joins with) |
 | `-c` | CSV mode (split/join handle quoted fields) |
-| `-f` | file mode |
 | `-e <prog>` | explain |
 | `-p <prog>` | parse tree |
 | `-i` | interactive |
@@ -613,7 +611,7 @@ t 'S:@0,-1' /etc/passwd
 **Reorder CSV columns (swap first two, keep rest):**
 ```bash
 awk -F, -v OFS=, '{print $2, $1, $3}' file
-t -d, -D, 's@1,0,2:j' file
+t 'S,@1,0,2:J,' file
 ```
 
 **Colon-delimited: 5th field, lowercased, reversed:**
@@ -643,10 +641,10 @@ t '/ERROR/r/.*ERROR: //sg0' app.log
 t 'sg0' access.log
 ```
 
-**Group CSV by category, sum values per category:**
+**Group CSV by category (column 3), extract values (column 2):**
 ```bash
-awk -F, '{sum[$3]+=$2} END {for (k in sum) print k, sum[k]}' data.csv
-t 'S,g2@1@1n+' data.csv
+awk -F, '{a[$3] = a[$3] " " $2} END {for (k in a) print k, a[k]}' data.csv
+t 'S,g2@1@1' data.csv
 ```
 
 ### Frequency & Deduplication
@@ -654,49 +652,49 @@ t 'S,g2@1@1n+' data.csv
 **Request counts by IP (first field of log):**
 ```bash
 awk '{print $1}' access.log | sort | uniq -c | sort -rn
-t 's@0do' access.log
+t 's@0^do' access.log
 ```
 
 **HTTP status code distribution (9th field):**
 ```bash
 awk '{print $9}' access.log | sort | uniq -c | sort -rn
-t 's@8do' access.log
+t 's@8^do' access.log
 ```
 
 **Most requested URLs (7th field), top 20:**
 ```bash
 awk '{print $7}' access.log | sort | uniq -c | sort -rn | head -20
-t 's@6do:20' access.log
+t 's@6^do:20' access.log
 ```
 
 **Top 10 file extensions:**
 ```bash
 ls -1 | grep '\.' | rev | cut -d. -f1 | rev | sort | uniq -c | sort -rn | head -10
-t '/\./S.@-1do:10' filelist
+t '/\./S.@-1^do:10' filelist
 ```
 
 **CSV: value frequency in column 1:**
 ```bash
 cut -d, -f1 data.csv | sort | uniq -c | sort -rn
-t 'S,@0do' data.csv
+t 'S,@0^do' data.csv
 ```
 
 **CSV: unique values in column 3, sorted:**
 ```bash
 cut -d, -f3 data.csv | sort -u
-t 'S,@2DO' data.csv
+t 'S,@2^DO' data.csv
 ```
 
 **Extract and count email domains:**
 ```bash
 grep -E '@' file | sed 's/.*@//' | sed 's/[^a-zA-Z0-9.-].*//' | sort | uniq -c | sort -rn
-t '/@/S@@-1do' file
+t '/@/S@@-1^do' file
 ```
 
 **Remove duplicate words within each line:**
 ```bash
 awk '{delete a; for(i=1;i<=NF;i++) if(!a[$i]++) printf "%s ", $i; print ""}' file
-t 's@Dj' file
+t 's@D0@1^J" "' file
 ```
 
 ### Counting & Aggregation
@@ -710,7 +708,7 @@ t '#' file
 **Count words (like wc -w):**
 ```bash
 wc -w < file
-t 'sj#' file
+t 'sf#' file
 ```
 
 **Sum a column of numbers:**
@@ -754,22 +752,10 @@ t 's@s@::-1^j^j' file
 
 ### Slicing
 
-**First 5 lines of each file:**
-```bash
-head -5 a.txt b.txt c.txt
-t -f 's:5' a.txt b.txt c.txt
-```
-
 **Every 3rd line, starting from line 2:**
 ```bash
 awk 'NR%3==2' file
 t '1::3' file
 ```
 
-### Multi-file Operations
 
-**Word frequency per file (top 10 each):**
-```bash
-for f in *.txt; do echo "==$f=="; tr -s '[:space:]' '\n' < "$f" | sort | uniq -c | sort -rn | head -10; done
-t -f 's@sjdo:10' *.txt
-```

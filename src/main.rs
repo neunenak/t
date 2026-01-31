@@ -23,9 +23,9 @@ patterns of Unix utilities like grep, sed, cut, awk, sort, and uniq.
 Example:
 Top 20 most frequent words (lowercased):
 
-  t 'sjldo:20' file
+  t 'sfldo:20' file
     s   - split lines into words
-    j   - flatten into single list
+    f   - flatten into single list
     l   - lowercase each word
     d   - dedupe with counts
     o   - sort descending
