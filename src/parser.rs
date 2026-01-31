@@ -1,3 +1,4 @@
+use regex::Regex;
 use winnow::ModalResult;
 use winnow::ascii::digit1;
 use winnow::combinator::{alt, cut_err, opt, repeat, separated};
@@ -10,9 +11,24 @@ use crate::ast::{Operator, Programme, SelectItem, Selection, Slice};
 /// Parse a complete programme (sequence of operators).
 pub fn parse_programme(input: &str) -> std::result::Result<Programme, String> {
     programme.parse(input).map_err(|e| {
-        let offset = e.offset();
+        let mut offset = e.offset();
         let message = if let Some(ctx) = e.inner().context().next() {
             match ctx {
+                StrContext::Label(label) if label.starts_with("invalid regex@") => {
+                    // Extract backtrack amount from "invalid regex@N: message"
+                    if let Some(rest) = label.strip_prefix("invalid regex@") {
+                        if let Some(colon_pos) = rest.find(':') {
+                            let backtrack: usize = rest[..colon_pos].parse().unwrap_or(0);
+                            offset = offset.saturating_sub(backtrack);
+                            let msg = rest[colon_pos + 1..].trim_start();
+                            format!("parse error: invalid regex: {}", msg)
+                        } else {
+                            format!("parse error: {}", label)
+                        }
+                    } else {
+                        format!("parse error: {}", label)
+                    }
+                }
                 StrContext::Label(label) => format!("parse error: expected {}", label),
                 StrContext::Expected(StrContextValue::Description(desc)) => {
                     format!("parse error: expected {}", desc)
@@ -44,6 +60,7 @@ fn operator(input: &mut &str) -> ModalResult<Operator> {
         trim_selected_op,
         partition_op,
         replace_op,
+        match_op,
         filter_op,
         group_by_op,
         dedupe_selection_op,
@@ -160,21 +177,22 @@ fn partition_op(input: &mut &str) -> ModalResult<Operator> {
 /// Parser for replace operator: `r[<selection>]/<old>/<new>/`
 fn replace_op(input: &mut &str) -> ModalResult<Operator> {
     'r'.parse_next(input)?;
-    // Optional selection before the first /
     let sel = opt(selection).parse_next(input)?;
-    // Now expect /<pattern>/<replacement>/
     cut_err('/')
         .context(StrContext::Expected(StrContextValue::Description("'/'")))
         .parse_next(input)?;
-    let pattern: &str = cut_err(take_till(1.., '/'))
+    let before = input.len();
+    let pattern = cut_err(|i: &mut &str| slash_delimited_pattern(i, true))
         .context(StrContext::Expected(StrContextValue::Description(
             "<pattern>",
         )))
         .parse_next(input)?;
+    let pattern_len = before - input.len();
+    validate_regex(&pattern, pattern_len).parse_next(input)?;
     cut_err('/')
         .context(StrContext::Expected(StrContextValue::Description("'/'")))
         .parse_next(input)?;
-    let replacement: &str = take_till(0.., '/').parse_next(input)?;
+    let replacement = slash_delimited_pattern(input, false)?;
     cut_err('/')
         .context(StrContext::Expected(StrContextValue::Description(
             "closing '/'",
@@ -182,8 +200,8 @@ fn replace_op(input: &mut &str) -> ModalResult<Operator> {
         .parse_next(input)?;
     Ok(Operator::Replace {
         selection: sel,
-        pattern: pattern.to_string(),
-        replacement: replacement.to_string(),
+        pattern,
+        replacement,
     })
 }
 
@@ -308,24 +326,115 @@ fn single_char_delim(input: &mut &str) -> ModalResult<String> {
     }
 }
 
-/// Parser for filter operator: `/<regex>/` or `!/<regex>/`
-fn filter_op(input: &mut &str) -> ModalResult<Operator> {
-    let negate = opt('!').parse_next(input)?.is_some();
+/// Parse a slash-delimited pattern, stopping at the first unescaped `/`.
+/// Backslash sequences are preserved for the regex engine.
+fn slash_delimited_pattern(input: &mut &str, require_non_empty: bool) -> ModalResult<String> {
+    let mut result = String::new();
+    loop {
+        let chunk: &str = take_till(0.., ('\\', '/')).parse_next(input)?;
+        result.push_str(chunk);
+
+        if input.starts_with('/') {
+            if require_non_empty && result.is_empty() {
+                return cut_err(winnow::combinator::fail)
+                    .context(StrContext::Expected(StrContextValue::Description(
+                        "<pattern>",
+                    )))
+                    .parse_next(input);
+            }
+            return Ok(result);
+        } else if input.starts_with('\\') {
+            '\\'.parse_next(input)?;
+            result.push('\\');
+            if input.is_empty() {
+                return cut_err(winnow::combinator::fail)
+                    .context(StrContext::Expected(StrContextValue::Description(
+                        "character after backslash",
+                    )))
+                    .parse_next(input);
+            }
+            let next_char: char = winnow::token::any.parse_next(input)?;
+            result.push(next_char);
+        } else {
+            return cut_err(winnow::combinator::fail)
+                .context(StrContext::Expected(StrContextValue::Description(
+                    "closing '/'",
+                )))
+                .parse_next(input);
+        }
+    }
+}
+
+/// Validate a regex pattern, returning a parse error if invalid.
+/// `pattern_len` is the length of the pattern in the source (may differ from pattern.len() due to escapes).
+fn validate_regex<'a>(
+    pattern: &str,
+    pattern_len: usize,
+) -> impl FnMut(&mut &'a str) -> ModalResult<()> + use<'a> {
+    let err_info = Regex::new(pattern).err().map(|e| {
+        let err_str = e.to_string();
+        let lines: Vec<&str> = err_str.lines().collect();
+
+        // Extract error offset from caret line (line 2, after 4-space indent)
+        let offset_in_pattern = lines
+            .get(2)
+            .and_then(|caret_line| caret_line.find('^'))
+            .map(|pos| pos.saturating_sub(4))
+            .unwrap_or(0);
+
+        // Extract just the core error message (last line starting with "error:")
+        let msg = lines
+            .iter()
+            .find(|line| line.starts_with("error:"))
+            .and_then(|line| line.strip_prefix("error: "))
+            .unwrap_or("invalid pattern");
+
+        // Encode the backtrack amount in the message for parse_programme to extract
+        // Format: "invalid regex@BACKTRACK: message"
+        let backtrack = pattern_len.saturating_sub(offset_in_pattern);
+        format!("invalid regex@{}: {}", backtrack, msg)
+    });
+    move |input: &mut &'a str| {
+        if let Some(ref msg) = err_info {
+            cut_err(winnow::combinator::fail)
+                .context(StrContext::Label(Box::leak(msg.clone().into_boxed_str())))
+                .parse_next(input)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Parser for match operator: `m/<regex>/`
+fn match_op(input: &mut &str) -> ModalResult<Operator> {
+    'm'.parse_next(input)?;
     '/'.parse_next(input)?;
-    let pattern: &str = cut_err(take_till(1.., '/'))
-        .context(StrContext::Expected(StrContextValue::Description(
-            "<pattern>",
-        )))
-        .parse_next(input)?;
+    let before = input.len();
+    let pattern = slash_delimited_pattern(input, true)?;
+    let pattern_len = before - input.len();
+    validate_regex(&pattern, pattern_len).parse_next(input)?;
     cut_err('/')
         .context(StrContext::Expected(StrContextValue::Description(
             "closing '/'",
         )))
         .parse_next(input)?;
-    Ok(Operator::Filter {
-        pattern: pattern.to_string(),
-        negate,
-    })
+    Ok(Operator::Match { pattern })
+}
+
+/// Parser for filter operator: `/<regex>/` or `!/<regex>/`
+fn filter_op(input: &mut &str) -> ModalResult<Operator> {
+    let negate = opt('!').parse_next(input)?.is_some();
+    '/'.parse_next(input)?;
+    let before = input.len();
+    let pattern = slash_delimited_pattern(input, true)?;
+    let pattern_len = before - input.len();
+    validate_regex(&pattern, pattern_len).parse_next(input)?;
+    cut_err('/')
+        .context(StrContext::Expected(StrContextValue::Description(
+            "closing '/'",
+        )))
+        .parse_next(input)?;
+    Ok(Operator::Filter { pattern, negate })
 }
 
 /// Parser for group by operator: `g<selection>`

@@ -66,6 +66,8 @@ pub enum Operator {
     /// `/<regex>/` - filter keep matching elements
     /// `!/<regex>/` - filter remove matching elements (keep non-matching)
     Filter { pattern: String, negate: bool },
+    /// `m/<regex>/` - extract all regex matches from each element
+    Match { pattern: String },
     /// `g<selection>` - group by the value(s) at the selection
     GroupBy(Selection),
     /// `;` - no-op separator

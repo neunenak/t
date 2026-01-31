@@ -28,6 +28,7 @@ pub const OPERATOR_HELP: &[HelpLine] = &[
         "replace in selected",
     ),
     HelpLine::Row("/<pat>/", "filter keep", "!/<pat>/", "filter remove"),
+    HelpLine::Single("m/<pat>/", "matches to array"),
     HelpLine::Row("d", "dedupe", "D<sel>", "dedupe on selected"),
     HelpLine::Row("o", "sort descending", "O", "sort ascending"),
     HelpLine::Row("x", "delete empty", "g<sel>", "group by"),

@@ -130,6 +130,7 @@ Arrays have a semantic "level" that determines how `s` splits and `j` joins:
 |----------|---------|
 | `/<regex>/` | keep matching |
 | `!/<regex>/` | keep non-matching |
+| `m/<regex>/` | extract all matches |
 | `x` | delete empty |
 
 #### Reduce
@@ -312,6 +313,25 @@ Removes elements matching the regex (keeps non-matching).
 
 ```
 ["apple", "banana", "apricot"]  →  ["banana"]   (with !/^a/)
+```
+
+#### `m/<regex>/` - Match All
+
+Extracts all regex matches from each element, returning an array of matches per element. This is the equivalent of `grep -o`.
+
+```
+# Extract all IP addresses from each line
+["192.168.1.1 to 10.0.0.1", "from 172.16.0.1"]  →  [["192.168.1.1", "10.0.0.1"], ["172.16.0.1"]]
+   (with m/\d+\.\d+\.\d+\.\d+/)
+
+# Extract all numbers
+"price: $42, qty: 7"  →  ["42", "7"]   (with m/\d+/)
+
+# Get first match only
+m/pattern/@0
+
+# Flatten all matches into single list
+m/pattern/f
 ```
 
 #### `x` - Delete Empty
@@ -748,6 +768,26 @@ t 's@::-1j' file
 # Bash equivalent is ugly:
 while IFS= read -r line; do echo "$line" | xargs -n1 | rev | xargs; done < file
 t 's@s@::-1^j^j' file
+```
+
+### Extraction
+
+**Extract all IP addresses from log file (like grep -o):**
+```bash
+grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' access.log
+t 'm/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/f' access.log
+```
+
+**Extract all numbers from text:**
+```bash
+grep -oE '[0-9]+' file
+t 'm/[0-9]+/f' file
+```
+
+**Extract email addresses:**
+```bash
+grep -oE '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' file
+t 'm/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/f' file
 ```
 
 ### Slicing

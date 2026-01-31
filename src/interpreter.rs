@@ -9,9 +9,9 @@ use crate::ast;
 use crate::error::{Error, Result};
 use crate::operators::{
     Ascend, Columnate, Count, DedupeSelectionWithCounts, DedupeWithCounts, DeleteEmpty, Descend,
-    Filter, Flatten, GroupBy, Join, JoinDelim, JoinMode, Lowercase, LowercaseSelected, NoOp,
-    Partition, Replace, Select, SortAscending, SortDescending, Split, SplitDelim, SplitMode, Sum,
-    ToNumber, ToNumberSelected, Trim, TrimSelected, Uppercase, UppercaseSelected,
+    Filter, Flatten, GroupBy, Join, JoinDelim, JoinMode, Lowercase, LowercaseSelected, MatchAll,
+    NoOp, Partition, Replace, Select, SortAscending, SortDescending, Split, SplitDelim, SplitMode,
+    Sum, ToNumber, ToNumberSelected, Trim, TrimSelected, Uppercase, UppercaseSelected,
 };
 use crate::value::Value;
 
@@ -227,6 +227,11 @@ fn compile_op(op: &ast::Operator, config: &CompileConfig) -> Result<Operator> {
             let regex = Regex::new(pattern)
                 .map_err(|e| Error::runtime(format!("invalid regex '{}': {}", pattern, e)))?;
             Operator::Transform(Box::new(Filter::new(regex, *negate)))
+        }
+        ast::Operator::Match { pattern } => {
+            let regex = Regex::new(pattern)
+                .map_err(|e| Error::runtime(format!("invalid regex '{}': {}", pattern, e)))?;
+            Operator::Transform(Box::new(MatchAll::new(regex)))
         }
         ast::Operator::GroupBy(sel) => Operator::Transform(Box::new(GroupBy::new(sel.clone()))),
         ast::Operator::NoOp => Operator::Transform(Box::new(NoOp)),
